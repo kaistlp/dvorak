@@ -1,0 +1,3 @@
+Writing command line to /tmp/e2nr14eSKX.dsk...
+warning: can't find squish-pty, so terminal input will fail
+bochs -q
