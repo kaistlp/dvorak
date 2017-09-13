@@ -28,6 +28,10 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+/* List of processes in THREAD_BLOCKED state, that is, processes
+   that are blocked by thread_block(). */
+static struct list block_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -91,6 +95,7 @@ thread_init (void)
 
   lock_init (&tid_lock);
   list_init (&ready_list);
+  list_init (&block_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -211,10 +216,17 @@ thread_create (const char *name, int priority,
 void
 thread_block (void) 
 {
+  enum intr_level old_level;
+
   ASSERT (!intr_context ());
   ASSERT (intr_get_level () == INTR_OFF);
 
-  thread_current ()->status = THREAD_BLOCKED;
+  old_level = intr_disable ();
+  struct thread *t = thread_current();
+  t->status = THREAD_BLOCKED;
+  list_push_back (&block_list, &t->elem);
+  intr_set_level (old_level);
+
   schedule ();
 }
 
@@ -235,6 +247,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
+  list_remove (&t->elem);
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
@@ -354,6 +367,24 @@ thread_get_recent_cpu (void)
   /* Not yet implemented. */
   return 0;
 }
+
+int
+thread_wakeup_call(int64_t now)
+{
+  struct list_elem *e;
+  for (e = list_begin (&block_list); e != list_end (&block_list);
+           e = list_next (e))
+    {
+      struct thread *t = list_entry (e, struct thread, elem);
+      if (t->time_wakeup >= now){
+        thread_unblock(t);
+        return 1;
+      }
+    }
+    return 1;
+}
+
+
 
 /* Idle thread.  Executes when no other thread is ready to run.
 

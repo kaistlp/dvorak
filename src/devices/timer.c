@@ -97,10 +97,12 @@ void
 timer_sleep (int64_t ticks) 
 {
   int64_t start = timer_ticks ();
-
+  struct thread * t = thread_current();
+  printf("timer_sleep called. (Thread id: %d)\n", (int)t->tid);
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+
+  t->time_wakeup = start + ticks;
+  thread_block();
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -136,6 +138,7 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+  thread_wakeup_call(timer_ticks());
   thread_tick ();
 }
 
