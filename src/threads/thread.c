@@ -28,9 +28,8 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
-/* List of processes in THREAD_BLOCKED state, that is, processes
-   that are blocked by thread_block(). */
-static struct list block_list;
+/* List of processes in sleeping state */
+static struct list sleep_list;
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -95,7 +94,7 @@ thread_init (void)
 
   lock_init (&tid_lock);
   list_init (&ready_list);
-  list_init (&block_list);
+  list_init (&sleep_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -216,17 +215,10 @@ thread_create (const char *name, int priority,
 void
 thread_block (void) 
 {
-  enum intr_level old_level;
-
   ASSERT (!intr_context ());
   ASSERT (intr_get_level () == INTR_OFF);
 
-  old_level = intr_disable ();
-  struct thread *t = thread_current();
-  t->status = THREAD_BLOCKED;
-  list_push_back (&block_list, &t->elem);
-  intr_set_level (old_level);
-
+  thread_current ()->status = THREAD_BLOCKED;
   schedule ();
 }
 
@@ -247,7 +239,6 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_remove (&t->elem);
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
@@ -372,18 +363,43 @@ int
 thread_wakeup_call(int64_t now)
 {
   struct list_elem *e;
-  for (e = list_begin (&block_list); e != list_end (&block_list);
-           e = list_next (e))
-    {
+  if (list_empty(&sleep_list)){
+    return 0;
+  } else {
+    e = list_begin(&sleep_list);
+    
+    while (!list_empty(&sleep_list) && e != list_end(&sleep_list)) {
       struct thread *t = list_entry (e, struct thread, elem);
-      if (t->time_wakeup >= now){
-        thread_unblock(t);
-        return 1;
+      if (t->time_wakeup <= now){
+        //printf("==============name: %s==============\n",t->name);
+        e = list_next(e);
+        thread_wakeup(t);
+      } else {
+        e = list_next(e);
       }
     }
-    return 1;
+  }
+  return 1;
 }
 
+void thread_sleep(struct thread *t){
+  t->status = THREAD_BLOCKED;
+  list_push_back(&sleep_list, &t->elem);
+  schedule();
+  intr_enable();
+}
+void thread_wakeup(struct thread *t){
+  enum intr_level old_level;
+
+  ASSERT (is_thread (t));
+
+  old_level = intr_disable ();
+  ASSERT (t->status == THREAD_BLOCKED);
+  list_remove (&t->elem);
+  t->status = THREAD_READY;
+  list_push_back(&ready_list, &t->elem);
+  intr_set_level (old_level);
+}
 
 
 /* Idle thread.  Executes when no other thread is ready to run.

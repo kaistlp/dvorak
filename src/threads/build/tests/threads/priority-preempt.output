@@ -1,17 +1,19 @@
-Writing command line to /tmp/SB9DeJ1vyu.dsk...
+Writing command line to /tmp/9N1012YMjK.dsk...
 warning: can't find squish-pty, so terminal input will fail
 bochs -q
 Kernel command line: -q run priority-preempt
 Pintos booting with 4,096 kB RAM...
-375 pages available in kernel pool.
+374 pages available in kernel pool.
 374 pages available in user pool.
-Kernel PANIC at ../../lib/kernel/list.c:259 in list_remove(): assertion `is_interior (elem)' failed.
-Call stack: 0xc01070dc 0xc0107175 0xc0100c18 0xc0100e89 0xc0100fb5 0xc010057a.
-The `backtrace' program can make call stacks useful.
-Read "Backtraces" in the "Debugging Tools" chapter
-of the Pintos documentation for more information.
-Timer: 0 ticks
-Thread: 0 idle ticks, 0 kernel ticks, 0 user ticks
-Console: 551 characters output
+Calibrating timer...  204,600 loops/s.
+Boot complete.
+Executing 'priority-preempt':
+(priority-preempt) begin
+(priority-preempt) The high-priority thread should have already completed.
+(priority-preempt) end
+Execution of 'priority-preempt' complete.
+Timer: 45 ticks
+Thread: 0 idle ticks, 48 kernel ticks, 0 user ticks
+Console: 468 characters output
 Keyboard: 0 keys pressed
 Powering off...

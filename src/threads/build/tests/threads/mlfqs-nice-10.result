@@ -1,10 +1,14 @@
 FAIL
-Kernel panic in run: PANIC at ../../lib/kernel/list.c:259 in list_remove(): assertion `is_interior (elem)' failed.
-Call stack: 0xc01070dc 0xc0107175 0xc0100c18 0xc0100e89 0xc0100fb5 0xc010057a
-Translation of call stack:
-0xc01070dc: debug_panic (.../../lib/kernel/debug.c:34)
-0xc0107175: list_remove (.../../lib/kernel/list.c:260)
-0xc0100c18: thread_unblock (..../../threads/thread.c:251)
-0xc0100e89: thread_create (..../../threads/thread.c:208)
-0xc0100fb5: thread_start (..../../threads/thread.c:118)
-0xc010057a: main (.../../../threads/init.c:109)
+Some tick counts were missing or differed from those expected by more than 25.
+thread   actual <-> expected explanation
+------ -------- --- -------- ----------------------------------------
+     0      301 <<< 672      Too small, by 346.
+     1      300 <<< 588      Too small, by 263.
+     2      300 <<< 492      Too small, by 167.
+     3      301 <<< 408      Too small, by 82.
+     4      301  =  316      
+     5      300 >>> 232      Too big, by 43.
+     6      300 >>> 152      Too big, by 123.
+     7      301 >>> 92       Too big, by 184.
+     8      301 >>> 40       Too big, by 236.
+     9      300 >>> 8        Too big, by 267.

@@ -1,10 +1,25 @@
 FAIL
-Kernel panic in run: PANIC at ../../lib/kernel/list.c:259 in list_remove(): assertion `is_interior (elem)' failed.
-Call stack: 0xc01070dc 0xc0107175 0xc0100c18 0xc0100e89 0xc0100fb5 0xc010057a
-Translation of call stack:
-0xc01070dc: debug_panic (.../../lib/kernel/debug.c:34)
-0xc0107175: list_remove (.../../lib/kernel/list.c:260)
-0xc0100c18: thread_unblock (..../../threads/thread.c:251)
-0xc0100e89: thread_create (..../../threads/thread.c:208)
-0xc0100fb5: thread_start (..../../threads/thread.c:118)
-0xc010057a: main (.../../../threads/init.c:109)
+Test output failed to match any acceptable form.
+
+Acceptable output:
+  (priority-donate-lower) begin
+  (priority-donate-lower) Main thread should have priority 41.  Actual priority: 41.
+  (priority-donate-lower) Lowering base priority...
+  (priority-donate-lower) Main thread should have priority 41.  Actual priority: 41.
+  (priority-donate-lower) acquire: got the lock
+  (priority-donate-lower) acquire: done
+  (priority-donate-lower) acquire must already have finished.
+  (priority-donate-lower) Main thread should have priority 21.  Actual priority: 21.
+  (priority-donate-lower) end
+Differences in `diff -u' format:
+  (priority-donate-lower) begin
+- (priority-donate-lower) Main thread should have priority 41.  Actual priority: 41.
++ (priority-donate-lower) Main thread should have priority 41.  Actual priority: 31.
+  (priority-donate-lower) Lowering base priority...
+- (priority-donate-lower) Main thread should have priority 41.  Actual priority: 41.
+- (priority-donate-lower) acquire: got the lock
+- (priority-donate-lower) acquire: done
++ (priority-donate-lower) Main thread should have priority 41.  Actual priority: 21.
+  (priority-donate-lower) acquire must already have finished.
+  (priority-donate-lower) Main thread should have priority 21.  Actual priority: 21.
+  (priority-donate-lower) end

@@ -135,6 +135,8 @@ void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
+void thread_sleep(struct thread *);
+void thread_wakeup(struct thread *);
 int thread_wakeup_call(int64_t now); // return 1 for successful wakeup
 
 #endif /* threads/thread.h */
