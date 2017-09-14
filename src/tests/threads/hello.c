@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include "tests/threads/tests.h"
-#include "threads/init.h"
 #include "threads/malloc.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
@@ -8,5 +7,8 @@
 
 void test_hello (void)
 {
-  printf("hello, world!\n");
+	struct thread *t = thread_current();
+	strlcpy (t->name, "hello", sizeof t->name);
+	printf("%s\n",t->name);
+	timer_sleep(500);
 }
