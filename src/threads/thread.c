@@ -239,7 +239,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  insert_to_ready_list(t);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -308,7 +308,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (curr != idle_thread) 
-    list_push_back (&ready_list, &curr->elem);
+  	insert_to_ready_list(curr);
   curr->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -319,6 +319,7 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  thread_current ()->priority_act = new_priority; 
 }
 
 /* Returns the current thread's priority. */
@@ -397,8 +398,22 @@ void thread_wakeup(struct thread *t){
   ASSERT (t->status == THREAD_BLOCKED);
   list_remove (&t->elem);
   t->status = THREAD_READY;
-  list_push_back(&ready_list, &t->elem);
+  insert_to_ready_list(t);
   intr_set_level (old_level);
+}
+
+bool compare_priority (const struct list_elem* e1,
+	const struct list_elem* e2, void *aux UNUSED)
+{
+	struct thread* t1 = list_entry (e1, struct thread, elem);
+	struct thread* t2 = list_entry (e2, struct thread, elem);
+	return (t1->priority_act > t2->priority_act);
+}
+
+void insert_to_ready_list(struct thread *t)
+{
+	list_insert_ordered (&ready_list, &t->elem, &compare_priority, NULL);	
+    //list_push_back(&ready_list, &t->elem);
 }
 
 
@@ -486,6 +501,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->priority_act = priority;
   t->magic = THREAD_MAGIC;
 }
 
@@ -602,3 +618,4 @@ allocate_tid (void)
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
+
