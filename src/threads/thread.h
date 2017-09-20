@@ -88,7 +88,7 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int priority_act;                   /* Actual Priority */
+    int priority_old;                   /* Old Priority */
 
     int64_t time_wakeup;
 
@@ -130,6 +130,8 @@ void thread_yield (void);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+void thread_change_priority (struct thread *, int);
+void thread_reset_priority (struct thread *);
 
 int thread_get_nice (void);
 void thread_set_nice (int);
@@ -139,6 +141,9 @@ int thread_get_load_avg (void);
 void thread_sleep(struct thread *);
 void thread_wakeup(struct thread *);
 int thread_wakeup_call(int64_t now); // return 1 for successful wakeup
+void yield_if_priority_changed(void);
+
+void print_list(struct list *);
 
 void insert_to_ready_list(struct thread*);
 bool compare_priority (const struct list_elem*, const struct list_elem*, void*);

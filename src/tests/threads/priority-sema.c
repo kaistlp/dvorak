@@ -7,6 +7,7 @@
 #include "threads/malloc.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "threads/interrupt.h"
 #include "devices/timer.h"
 
 static thread_func priority_sema_thread;
@@ -29,17 +30,21 @@ test_priority_sema (void)
       snprintf (name, sizeof name, "priority %d", priority);
       thread_create (name, priority, priority_sema_thread, NULL);
     }
-
+    
   for (i = 0; i < 10; i++) 
     {
       sema_up (&sema);
-      msg ("Back in main thread."); 
+      //enum intr_level old_level;
+      //old_level = intr_disable();
+      msg ("Back in main thread.");
+      //intr_set_level(old_level); 
     }
 }
 
 static void
 priority_sema_thread (void *aux UNUSED) 
 {
+  //msg ("Thread %s sema down.", thread_name ());
   sema_down (&sema);
   msg ("Thread %s woke up.", thread_name ());
 }

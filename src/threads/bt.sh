@@ -1,1 +1,0 @@
-backtrace ./build/kernel.o \
