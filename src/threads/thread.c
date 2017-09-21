@@ -328,7 +328,7 @@ thread_set_priority (int new_priority)
     remove_ordered_list(t->lock->holder->priorities, temp);
     insert_ordered_list(t->lock->holder->priorities, t->priority);
     thread_priority_update(t->lock->holder);
-  }  
+  }
 
   enum intr_level old_level;
   old_level = intr_disable ();
@@ -468,6 +468,7 @@ void thread_priority_update (struct thread *t) {
   if (t->lock != NULL){
     remove_ordered_list(t->lock->holder->priorities, temp);
     insert_ordered_list(t->lock->holder->priorities, t->priority);
+    list_sort(&(t->lock->semaphore.waiters), compare_priority, NULL);
     thread_priority_update(t->lock->holder);
   }
 }

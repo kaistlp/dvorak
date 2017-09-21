@@ -45,6 +45,15 @@ void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
 
 bool compare_thread_priority (const struct list_elem*, const struct list_elem*, void*);
+bool compare_cond_thread_priority (const struct list_elem*, const struct list_elem*, void*);
+
+/* One semaphore in a list. */
+struct semaphore_elem 
+  {
+    struct list_elem elem;              /* List element. */
+    struct semaphore semaphore;         /* This semaphore. */
+    int priority                        /* Priority for semaphore */
+  };
 
 /* Optimization barrier.
 
