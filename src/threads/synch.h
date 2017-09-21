@@ -4,6 +4,9 @@
 #include <list.h>
 #include <stdbool.h>
 
+#define MAX(a, b) (a > b) ? a : b
+#define LIST_SIZE 40
+
 /* A counting semaphore. */
 struct semaphore 
   {
@@ -41,7 +44,7 @@ void cond_wait (struct condition *, struct lock *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
 
-bool compare_priority2 (const struct list_elem*, const struct list_elem*, void*);
+bool compare_thread_priority (const struct list_elem*, const struct list_elem*, void*);
 
 /* Optimization barrier.
 

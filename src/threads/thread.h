@@ -24,6 +24,8 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+#define LIST_SIZE 40
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -88,9 +90,12 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int priority_old;                   /* Old Priority */
+    int priority_original;              /* Old Priority */
 
     int64_t time_wakeup;
+
+    int priorities[LIST_SIZE];           /* List of related thread's priorities */ 
+    struct lock *lock;                   /* lock which thread is held */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -143,9 +148,13 @@ void thread_wakeup(struct thread *);
 int thread_wakeup_call(int64_t now); // return 1 for successful wakeup
 void yield_if_priority_changed(void);
 
+void thread_priority_update (struct thread *);
 void print_list(struct list *);
 
 void insert_to_ready_list(struct thread*);
 bool compare_priority (const struct list_elem*, const struct list_elem*, void*);
+
+void insert_ordered_list (int *list, int e);
+void remove_ordered_list (int *list, int e);
 
 #endif /* threads/thread.h */

@@ -95,7 +95,6 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&sleep_list);
-
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
@@ -320,9 +319,17 @@ void
 thread_set_priority (int new_priority) 
 {
   struct thread *t = thread_current ();
-  t->priority_old = t->priority;
-  t->priority = new_priority;
-  
+  int temp = t->priority;
+
+  t->priority_original = new_priority;
+  t->priority = MAX (t->priority_original, t->priorities[0]);
+
+  if (t->lock != NULL){
+    remove_ordered_list(t->lock->holder->priorities, temp);
+    insert_ordered_list(t->lock->holder->priorities, t->priority);
+    thread_priority_update(t->lock->holder);
+  }  
+
   enum intr_level old_level;
   old_level = intr_disable ();
   list_sort(&ready_list, compare_priority, NULL);
@@ -341,8 +348,9 @@ thread_get_priority (void)
 void
 thread_change_priority (struct thread *t, int new_priority) 
 {
+  int temp = t->priority;
   t->priority = new_priority;
-  
+  //printf("Thread %d -> %d\n", temp, new_priority);
   enum intr_level old_level;
   old_level = intr_disable ();
   list_sort(&ready_list, compare_priority, NULL);
@@ -351,7 +359,7 @@ thread_change_priority (struct thread *t, int new_priority)
 
 void thread_reset_priority (struct thread *t)
 {
-  t->priority = t->priority_old;
+  t->priority = t->priority_original;
 
   enum intr_level old_level;
   old_level = intr_disable ();
@@ -453,6 +461,17 @@ void yield_if_priority_changed(){
   }
 }
 
+void thread_priority_update (struct thread *t) {
+  ASSERT(is_thread(t));
+  int temp = t->priority;
+  thread_change_priority(t, MAX (t->priority_original, t->priorities[0]));
+  if (t->lock != NULL){
+    remove_ordered_list(t->lock->holder->priorities, temp);
+    insert_ordered_list(t->lock->holder->priorities, t->priority);
+    thread_priority_update(t->lock->holder);
+  }
+}
+
 void print_list(struct list *list){
   enum intr_level old_level = intr_disable();
   struct list_elem *e;
@@ -549,8 +568,14 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
-  t->priority_old = priority;
+  t->priority_original = priority;
   t->magic = THREAD_MAGIC;
+  t->lock = NULL;
+
+  int i;
+  for (i=0; i<LIST_SIZE; i++){
+    t->priorities[i] = -1;
+  }
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -667,3 +692,35 @@ allocate_tid (void)
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
 
+void insert_ordered_list (int *list , int e){
+  int i,j;
+  for (i=0; i<LIST_SIZE; i++){
+    if (list[i] == -1) {
+      list[i] = e;
+      return;
+    } else {
+      if (list[i] < e){
+        for (j=LIST_SIZE-1; j > i; j--){
+          list[j] = list[j-1];
+        }
+        list[i] = e;
+        return;
+      }
+    }
+  }
+}
+
+void remove_ordered_list (int *list, int e) {
+  enum intr_level old_level = intr_disable();
+  int i,j;
+  for (i=0; i< LIST_SIZE; i++){
+    if (list[i] == e) {
+      for (j=i; j<LIST_SIZE-2; j++){
+        list[j] = list[j+1];
+      }
+      list[LIST_SIZE-1] = -1;
+      return;
+    }
+  }
+  intr_set_level(old_level);
+}
