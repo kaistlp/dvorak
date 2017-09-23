@@ -99,10 +99,9 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
   struct thread * t = thread_current();
   ASSERT (intr_get_level () == INTR_ON);
-  //printf("Tid: %d\n sleeping..", t->tid);
-  t->time_wakeup = start + ticks;
-
+  
   intr_disable ();
+  t->time_wakeup = start + ticks;
   thread_sleep (t);
 }
 

@@ -30,6 +30,7 @@ static struct list ready_list;
 
 /* List of processes in sleeping state */
 static struct list sleep_list;
+static int64_t time_wakeup_min;
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -321,6 +322,7 @@ thread_set_priority (int new_priority)
   struct thread *t = thread_current ();
   int temp = t->priority;
 
+
   t->priority_original = new_priority;
   t->priority = MAX (t->priority_original, t->priorities[0]);
 
@@ -328,7 +330,7 @@ thread_set_priority (int new_priority)
     remove_ordered_list(t->lock->holder->priorities, temp);
     insert_ordered_list(t->lock->holder->priorities, t->priority);
     thread_priority_update(t->lock->holder);
-  }
+  }  
 
   enum intr_level old_level;
   old_level = intr_disable ();
@@ -402,14 +404,15 @@ thread_wakeup_call(int64_t now)
 {
   struct list_elem *e;
   if (list_empty(&sleep_list)){
-    return 0;
+    return 0; // List iis empty
   } else {
+  	if (time_wakeup_min > now)
+  		return 0; // Nothing to wake up
+
     e = list_begin(&sleep_list);
-    
     while (!list_empty(&sleep_list) && e != list_end(&sleep_list)) {
       struct thread *t = list_entry (e, struct thread, elem);
       if (t->time_wakeup <= now){
-        //printf("==============name: %s==============\n",t->name);
         e = list_next(e);
         thread_wakeup(t);
       } else {
@@ -422,6 +425,7 @@ thread_wakeup_call(int64_t now)
 
 void thread_sleep(struct thread *t){
   t->status = THREAD_BLOCKED;
+  time_wakeup_min = MIN(time_wakeup_min, t->time_wakeup);
   list_push_back(&sleep_list, &t->elem);
   schedule();
   intr_enable();

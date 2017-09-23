@@ -5,6 +5,7 @@
 #include <stdbool.h>
 
 #define MAX(a, b) (a > b) ? a : b
+#define MIN(a, b) (a < b) ? a : b
 #define LIST_SIZE 40
 
 /* A counting semaphore. */
