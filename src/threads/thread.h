@@ -149,7 +149,6 @@ int thread_wakeup_call(int64_t now); // return 1 for successful wakeup
 void yield_if_priority_changed(void);
 
 void thread_priority_update (struct thread *);
-void print_list(struct list *);
 
 void insert_to_ready_list(struct thread*);
 bool compare_priority (const struct list_elem*, const struct list_elem*, void*);

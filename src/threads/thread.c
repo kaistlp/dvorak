@@ -477,17 +477,6 @@ void thread_priority_update (struct thread *t) {
   }
 }
 
-void print_list(struct list *list){
-  enum intr_level old_level = intr_disable();
-  struct list_elem *e;
-  for (e = list_begin (list); e != list_end (list); e = list_next (e))
-     {
-       msg("%d -> ", list_entry(e, struct thread, elem)->priority);
-     }
-     msg("\n");
-  intr_set_level (old_level);
-}
-
 
 /* Idle thread.  Executes when no other thread is ready to run.
 
