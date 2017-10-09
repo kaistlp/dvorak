@@ -26,6 +26,8 @@
 
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
+static struct list all_list;
+static struct list dead_list;
 static struct list ready_list;
 
 /* List of processes in sleeping state */
@@ -96,6 +98,8 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&sleep_list);
+  list_init (&all_list);
+  list_init (&dead_list);
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
@@ -204,6 +208,9 @@ thread_create (const char *name, int priority,
   thread_unblock (t);
   yield_if_priority_changed();
 
+  /* Add to all_list */
+  list_push_back(&all_list, &t->all_elem);
+
   return tid;
 }
 
@@ -284,15 +291,18 @@ void
 thread_exit (void) 
 {
   ASSERT (!intr_context ());
-
+  
 #ifdef USERPROG
   process_exit ();
 #endif
 
   /* Just set our status to dying and schedule another process.
      We will be destroyed during the call to schedule_tail(). */
+  struct thread *curr = thread_current();
   intr_disable ();
+  list_remove(&curr->all_elem);
   thread_current ()->status = THREAD_DYING;
+  list_push_back(&dead_list, &curr->all_elem);
   schedule ();
   NOT_REACHED ();
 }
@@ -477,6 +487,51 @@ void thread_priority_update (struct thread *t) {
   }
 }
 
+bool thread_is_alive (tid_t tid) {
+  if (thread_current()->tid == tid)
+    return true;
+
+  struct list_elem* e;
+  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e))
+  {
+    if (list_entry(e, struct thread, all_elem)->tid == tid)
+      return true;
+  }
+  return false;
+}
+
+struct thread *lookup_all_list(tid_t tid) {
+  struct list_elem* e;
+  if (list_empty(&all_list)){
+    return NULL;
+  }
+
+  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e))
+  {
+    struct thread *t = list_entry(e, struct thread, all_elem);
+    if (t->tid == tid)
+      return t;
+  }
+  return NULL;
+}
+
+struct thread *lookup_dead_list(tid_t tid) {
+  struct list_elem* e;
+  if (list_empty(&dead_list)){
+    return NULL;
+  }
+
+  for (e = list_begin (&dead_list); e != list_end (&dead_list); e = list_next (e))
+  {
+    struct thread *t = list_entry(e, struct thread, all_elem);
+    if (t->tid == tid)
+      return t;
+  }
+  return NULL;
+}
+
+/******************************************************************************************/
+
 
 /* Idle thread.  Executes when no other thread is ready to run.
 
@@ -565,6 +620,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority_original = priority;
   t->magic = THREAD_MAGIC;
   t->lock = NULL;
+  t->exit_status = -1;
 
   int i;
   for (i=0; i<LIST_SIZE; i++){

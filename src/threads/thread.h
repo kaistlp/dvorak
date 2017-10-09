@@ -17,6 +17,7 @@ enum thread_status
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
+typedef int pid_t;
 #define TID_ERROR ((tid_t) -1)          /* Error value for tid_t. */
 
 /* Thread priorities. */
@@ -97,11 +98,15 @@ struct thread
     int priorities[LIST_SIZE];           /* List of related thread's priorities */ 
     struct lock *lock;                   /* lock which thread is held */
 
+    int exit_status;
+    
     /* Shared between thread.c and synch.c. */
+    struct list_elem all_elem;
     struct list_elem elem;              /* List element. */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
+    pid_t pid;
     uint32_t *pagedir;                  /* Page directory. */
 #endif
 
@@ -155,5 +160,10 @@ bool compare_priority (const struct list_elem*, const struct list_elem*, void*);
 
 void insert_ordered_list (int *list, int e);
 void remove_ordered_list (int *list, int e);
+
+bool thread_is_alive (tid_t tid);
+struct thread *lookup_all_list(tid_t tid);
+struct thread *lookup_dead_list(tid_t tid);
+
 
 #endif /* threads/thread.h */

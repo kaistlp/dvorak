@@ -20,7 +20,8 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
-
+static pid_t allocate_pid (void);
+static struct list process_list;
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -38,10 +39,35 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  // Intialize Process Control Block 
+  struct process *pcb = palloc_get_page(PAL_USER);
+  init_pcb(pcb, file_name);
+  printf("(%s) pid: %d\n", pcb->name, pcb->pid);
+
+  if (pcb->pid == 1) { // starter process
+    process_init();
+  }
+
+  list_push_back(&process_list, &pcb->elem);
+
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
+  struct thread *child_t = lookup_all_list(tid);
+  ASSERT(child_t != NULL);
+  child_t->pid = pcb->pid;
+
+  struct process *ppcb = process_current();
+  // Update Parent, Child Info
+  pcb->parent = ppcb;
+  list_push_back(&ppcb->child_list, &pcb->elem_heir);
+
+
+  print_process();
+
+  if (tid == TID_ERROR) {
     palloc_free_page (fn_copy); 
+    palloc_free_page (pcb);
+  }
   return tid;
 }
 
@@ -86,11 +112,51 @@ start_process (void *f_name)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  while(1)
-    ;
-  return -1;
+
+  // child인지 체크하기
+  struct process *cur_pcb = process_current();
+  if (cur_pcb == NULL)
+    return -1;
+  if (list_empty(&cur_pcb->child_list))
+    return -1;
+
+  struct thread *t = lookup_all_list(child_tid);
+  if (t == NULL)
+    return -1;
+
+  bool is_child = false;
+  struct process *wait_pcb;
+  struct list_elem *e;
+  for (e = list_begin (&cur_pcb->child_list); e != list_end (&cur_pcb->child_list); e = list_next (e))
+  {
+    wait_pcb = list_entry(e, struct process, elem_heir);
+    if (wait_pcb->pid == t->pid) {
+      is_child = true;
+      break;
+    }
+  }
+  if (!is_child)
+    return -1;
+
+  while(thread_is_alive(child_tid))
+    thread_yield();
+
+  // Remove wait_pcb
+  list_remove(&wait_pcb->elem_heir);
+  list_remove(&wait_pcb->elem);
+
+  struct list_elem *e2;
+  for (e2 = list_begin (&wait_pcb->child_list); e2 != list_end (&wait_pcb->child_list); e2 = list_next (e))
+  {
+    struct process *child_pcb = list_entry(e, struct process, elem_heir);
+    child_pcb->parent = NULL;
+  }
+  palloc_free_page (wait_pcb);
+
+  return wait_pcb->exit_status;
+
 }
 
 /* Free the current process's resources. */
@@ -116,6 +182,9 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  struct process *pcb = process_current();
+  pcb->exit_status = curr->exit_status;
+  printf("%s: exit(%d)\n", curr->name, curr->exit_status);
 }
 
 /* Sets up the CPU for running user code in the current
@@ -133,6 +202,75 @@ process_activate (void)
      interrupts. */
   tss_update ();
 }
+
+void init_pcb(struct process *pcb, char* name){
+  memset(pcb, 0, sizeof *pcb);
+  pcb->pid = allocate_pid();
+  strlcpy (pcb->name, name, sizeof pcb->name);
+  pcb->exit_status = -1;
+  pcb->parent = NULL;
+  list_init(&pcb->child_list);
+}
+
+struct process* process_current(void){
+  struct list_elem* e;
+  if (list_empty(&process_list)){
+    return NULL;
+  }
+
+  for (e = list_begin (&process_list); e != list_end (&process_list); e = list_next (e))
+  {
+    struct process *pcb = list_entry(e, struct process, elem);
+    if (pcb->pid == thread_current()->pid)
+      return pcb;
+  }
+  return NULL;
+}
+
+void process_init(void) {
+  list_init(&process_list);
+
+  struct process *root_pcb = palloc_get_page(PAL_USER);
+  memset(root_pcb, 0, sizeof *root_pcb);
+  root_pcb->pid = 0; // root
+  list_init(&root_pcb->child_list);
+  list_push_back(&process_list, &root_pcb->elem);
+}
+
+void print_process(void){
+  struct list_elem* e;
+  struct list_elem* e2;
+  for (e = list_begin (&process_list); e != list_end (&process_list); e = list_next (e))
+  {
+    struct process *pcb = list_entry(e, struct process, elem);
+    printf("[%d]:\tparent: ", pcb->pid);
+    if (pcb->parent == NULL) {
+      printf("NULL,\t");
+    } else {
+      printf("%d,\t",pcb->parent->pid);
+    }
+    printf("child: ["); 
+    if (!list_empty(&pcb->child_list)) {
+      for (e2 = list_begin (&pcb->child_list); e2 != list_end (&pcb->child_list); e2 = list_next (e2))
+      {
+        struct process *child_pcb = list_entry(e2, struct process, elem_heir);
+        printf("%d, ", child_pcb->pid);
+      }
+    }
+    printf("]\n");
+  }
+}
+
+/* Returns a pid to use for a new process. */
+static pid_t
+allocate_pid (void) 
+{
+  static pid_t next_pid = 1;
+  pid_t pid;
+  pid = next_pid++;
+  return pid;
+} 
+
 
 /* We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */
