@@ -203,13 +203,13 @@ thread_create (const char *name, int priority,
   /* Stack frame for switch_threads(). */
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
-
+  
+  /* Add to all_list */
+  list_push_back(&all_list, &t->all_elem);
+  
   /* Add to run queue. */
   thread_unblock (t);
   yield_if_priority_changed();
-
-  /* Add to all_list */
-  list_push_back(&all_list, &t->all_elem);
 
   return tid;
 }
@@ -492,6 +492,7 @@ bool thread_is_alive (tid_t tid) {
     return true;
 
   struct list_elem* e;
+  //printf("%d\n", list_size(&all_list));
   for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e))
   {
     if (list_entry(e, struct thread, all_elem)->tid == tid)
@@ -529,6 +530,23 @@ struct thread *lookup_dead_list(tid_t tid) {
   }
   return NULL;
 }
+
+#ifdef USERPROG
+struct thread* lookup_thread_by_pid (pid_t pid) {
+  struct list_elem* e;
+  if (list_empty(&all_list)){
+    return NULL;
+  }
+
+  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e))
+  {
+    struct thread *t = list_entry(e, struct thread, all_elem);
+    if (t->pid == pid)
+      return t;
+  }
+  return NULL;
+}
+#endif
 
 /******************************************************************************************/
 

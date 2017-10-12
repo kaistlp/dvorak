@@ -17,17 +17,22 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/synch.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static pid_t allocate_pid (void);
 static struct list process_list;
+static bool install_page (void *upage, void *kpage, bool writable);
+
+struct lock process_lock;
+
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
-process_execute (const char *file_name) 
+process_execute (const char *cmd_line) 
 {
   char *fn_copy;
   tid_t tid;
@@ -37,36 +42,33 @@ process_execute (const char *file_name)
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  strlcpy (fn_copy, cmd_line, PGSIZE);
 
   // Intialize Process Control Block 
-  struct process *pcb = palloc_get_page(PAL_USER);
-  init_pcb(pcb, file_name);
-  printf("(%s) pid: %d\n", pcb->name, pcb->pid);
+  struct process *pcb = malloc(sizeof(struct process));
+  init_pcb(pcb, cmd_line);
+  if (VERBOSE) printf("(%s) pid: %d, ", pcb->name, pcb->pid);
 
   if (pcb->pid == 1) { // starter process
     process_init();
   }
-
   list_push_back(&process_list, &pcb->elem);
 
+  // Update Parent, Child Info
+  struct process *ppcb = process_current();
+  pcb->parent = ppcb;
+  list_push_back(&ppcb->child_list, &pcb->elem_heir);
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (cmd_line, PRI_DEFAULT, start_process, fn_copy);
+  pcb->tid = tid;
   struct thread *child_t = lookup_all_list(tid);
   ASSERT(child_t != NULL);
   child_t->pid = pcb->pid;
 
-  struct process *ppcb = process_current();
-  // Update Parent, Child Info
-  pcb->parent = ppcb;
-  list_push_back(&ppcb->child_list, &pcb->elem_heir);
-
-
-  print_process();
-
   if (tid == TID_ERROR) {
     palloc_free_page (fn_copy); 
-    palloc_free_page (pcb);
+    free (pcb);
   }
   return tid;
 }
@@ -76,7 +78,7 @@ process_execute (const char *file_name)
 static void
 start_process (void *f_name)
 {
-  char *file_name = f_name;
+  char *cmd_line = f_name;
   struct intr_frame if_;
   bool success;
 
@@ -85,12 +87,55 @@ start_process (void *f_name)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
+
+  char *argv, *save_ptr;
+  int argc = 0;
+  int stack_offset = 0;
+  int len = 0;
+
+
+  char *file_name = strtok_r (cmd_line, " ", &save_ptr);
   success = load (file_name, &if_.eip, &if_.esp);
 
-  /* If load failed, quit. */
-  palloc_free_page (file_name);
-  if (!success) 
+  if (success) {
+    process_current()->load = LOAD_SUCESS;
+    // sema_up(&process_sema);
+    while(cmd_line) {
+      argc++;
+      len += strlen(cmd_line)+1;
+      cmd_line = strtok_r (NULL, " ", &save_ptr);
+    }
+
+    // insert to stack pointer
+    int i = 0;
+    int arg_index = 0;
+    char* cp_index = if_.esp - len;
+    int argv_0 = (ROUND_DOWN((unsigned int)cp_index, 4) - 4 * (argc + 1 - arg_index));
+    for (arg_index = 0; arg_index < argc; arg_index++) {
+      while(*file_name == ' ')
+        file_name++;
+      *(int *) (argv_0 + 4 *arg_index) = (int) (cp_index + i);
+      while(*file_name) {
+        *(cp_index+i) = *file_name;
+        file_name++;
+        i++;
+      }
+      i++;
+      file_name++;
+    }
+    *(int *)(argv_0 - 4) = argv_0;
+    *(int *)(argv_0 - 8) = argc;
+    if_.esp = argv_0 - 12;
+
+    palloc_free_page (cmd_line); 
+    //hex_dump (if_.esp, if_.esp, PHYS_BASE - if_.esp, 1);
+  } else {
+    /* If load failed, quit. */
+    process_current()->load = LOAD_FAIL;
+    // sema_up(&process_sema);
+    palloc_free_page (cmd_line); 
     thread_exit ();
+  } 
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -114,48 +159,28 @@ start_process (void *f_name)
 int
 process_wait (tid_t child_tid) 
 {
-
-  // child인지 체크하기
-  struct process *cur_pcb = process_current();
-  if (cur_pcb == NULL)
-    return -1;
-  if (list_empty(&cur_pcb->child_list))
-    return -1;
-
-  struct thread *t = lookup_all_list(child_tid);
-  if (t == NULL)
-    return -1;
-
-  bool is_child = false;
-  struct process *wait_pcb;
-  struct list_elem *e;
-  for (e = list_begin (&cur_pcb->child_list); e != list_end (&cur_pcb->child_list); e = list_next (e))
-  {
-    wait_pcb = list_entry(e, struct process, elem_heir);
-    if (wait_pcb->pid == t->pid) {
-      is_child = true;
-      break;
-    }
-  }
-  if (!is_child)
+  // check whether child_tid is owned by child process of caller process
+  struct process *child_process = get_child_process_by_tid(child_tid);
+  if (child_process == NULL)
     return -1;
 
   while(thread_is_alive(child_tid))
     thread_yield();
 
   // Remove wait_pcb
-  list_remove(&wait_pcb->elem_heir);
-  list_remove(&wait_pcb->elem);
+  list_remove(&child_process->elem_heir);
+  list_remove(&child_process->elem);
 
   struct list_elem *e2;
-  for (e2 = list_begin (&wait_pcb->child_list); e2 != list_end (&wait_pcb->child_list); e2 = list_next (e))
+  for (e2 = list_begin (&child_process->child_list); e2 != list_end (&child_process->child_list); e2 = list_next (e2))
   {
-    struct process *child_pcb = list_entry(e, struct process, elem_heir);
+    struct process *child_pcb = list_entry(e2, struct process, elem_heir);
     child_pcb->parent = NULL;
   }
-  palloc_free_page (wait_pcb);
+  int exit_status = child_process->exit_status;
+  free (child_process);
 
-  return wait_pcb->exit_status;
+  return exit_status;
 
 }
 
@@ -184,7 +209,7 @@ process_exit (void)
     }
   struct process *pcb = process_current();
   pcb->exit_status = curr->exit_status;
-  printf("%s: exit(%d)\n", curr->name, curr->exit_status);
+  printf("%s: exit(%d)\n", pcb->name, curr->exit_status);
 }
 
 /* Sets up the CPU for running user code in the current
@@ -206,10 +231,25 @@ process_activate (void)
 void init_pcb(struct process *pcb, char* name){
   memset(pcb, 0, sizeof *pcb);
   pcb->pid = allocate_pid();
-  strlcpy (pcb->name, name, sizeof pcb->name);
+
+  // Parse program name
+  char* save_ptr;
+  char* name_copy = malloc(strlen(name)+1);
+  memset(name_copy, 0, strlen(name)+1);
+  strlcpy (name_copy, name, strlen(name)+1);
+  char *file_name = strtok_r(name_copy, " ", &save_ptr);
+  strlcpy (pcb->name, file_name, strnlen(file_name, sizeof pcb->name)+1);
+
+  pcb->load = NOT_LOAD;
   pcb->exit_status = -1;
   pcb->parent = NULL;
   list_init(&pcb->child_list);
+
+  // file descriptor structure
+  list_init(&pcb->fd_list);
+  pcb->fd_num = 2;
+
+  free(name_copy);
 }
 
 struct process* process_current(void){
@@ -230,20 +270,28 @@ struct process* process_current(void){
 void process_init(void) {
   list_init(&process_list);
 
-  struct process *root_pcb = palloc_get_page(PAL_USER);
-  memset(root_pcb, 0, sizeof *root_pcb);
+  struct process *root_pcb = malloc(sizeof(struct process));
   root_pcb->pid = 0; // root
   list_init(&root_pcb->child_list);
   list_push_back(&process_list, &root_pcb->elem);
+
+  list_init(&root_pcb->fd_list);
+  root_pcb->fd_num = 2;
+  root_pcb->load = LOAD_SUCESS;
+  root_pcb->tid = thread_current()->tid;
+
+  sema_init(&process_sema, 0);
+  lock_init(&process_lock);  
 }
 
 void print_process(void){
   struct list_elem* e;
   struct list_elem* e2;
+  struct list_elem* e3;
   for (e = list_begin (&process_list); e != list_end (&process_list); e = list_next (e))
   {
     struct process *pcb = list_entry(e, struct process, elem);
-    printf("[%d]:\tparent: ", pcb->pid);
+    printf("[pid:%d, tid:%d]:\tparent: ", pcb->pid, pcb->tid);
     if (pcb->parent == NULL) {
       printf("NULL,\t");
     } else {
@@ -255,6 +303,16 @@ void print_process(void){
       {
         struct process *child_pcb = list_entry(e2, struct process, elem_heir);
         printf("%d, ", child_pcb->pid);
+      }
+    }
+    printf("], ");
+
+    printf("fd_list: ["); 
+    if (!list_empty(&pcb->fd_list)) {
+      for (e3 = list_begin (&pcb->fd_list); e3 != list_end (&pcb->fd_list); e3 = list_next (e3))
+      {
+        struct file_node *fe = list_entry(e3, struct file_node, elem);
+        printf("%d, ", fe->fd);
       }
     }
     printf("]\n");
@@ -270,6 +328,55 @@ allocate_pid (void)
   pid = next_pid++;
   return pid;
 } 
+
+struct file_node* get_file_of_process(int fd) {
+  struct process* cur_pcb = process_current();
+  struct list_elem *e;
+  for (e = list_begin (&cur_pcb->fd_list); e != list_end (&cur_pcb->fd_list); e = list_next (e))
+  {
+    struct file_node *f = list_entry(e, struct file_node, elem);
+    if (f->fd == fd)
+      return f;
+  }
+  return NULL;
+}
+
+bool is_running (const char* file_name) {
+  struct list_elem* e;
+  for (e = list_begin (&process_list); e != list_end (&process_list); e = list_next (e))
+  {
+    struct process *pcb = list_entry(e, struct process, elem);
+    if (pcb->name != NULL && strcmp(pcb->name, file_name) == 0) {
+      // file is running (exec)
+      return true;
+    } 
+  }
+  return false;
+}
+
+struct process* get_child_process_by_tid (tid_t tid){
+  struct process* pcb = process_current();
+  struct list_elem* e;
+  for (e = list_begin (&pcb->child_list); e != list_end (&pcb->child_list); e = list_next (e))
+  {
+    struct process *p = list_entry(e, struct process, elem_heir);
+    if (p->tid == tid)
+      return p;
+  }
+  return NULL;
+}
+
+struct process* lookup_process_by_pid (pid_t pid) {
+  struct list_elem* e;
+
+  for (e = list_begin (&process_list); e != list_end (&process_list); e = list_next (e))
+  {
+    struct process *p = list_entry(e, struct process, elem);
+    if (p->pid == pid)
+      return p;
+  }
+  return NULL;
+}
 
 
 /* We load ELF binaries.  The following definitions are taken
@@ -364,7 +471,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Open executable file. */
   file = filesys_open (file_name);
   if (file == NULL) 
-    {
+    { 
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
@@ -458,7 +565,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
 /* load() helpers. */
 
-static bool install_page (void *upage, void *kpage, bool writable);
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
@@ -577,7 +683,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12;
+        *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
@@ -602,4 +708,16 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+bool is_executable (struct file* fs){
+  /* Read and verify executable header. */
+  struct Elf32_Ehdr ehdr;
+  return !(file_read_at (fs, &ehdr, sizeof ehdr, 0) != sizeof ehdr
+      || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
+      || ehdr.e_type != 2
+      || ehdr.e_machine != 3
+      || ehdr.e_version != 1
+      || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
+      || ehdr.e_phnum > 1024);
 }
