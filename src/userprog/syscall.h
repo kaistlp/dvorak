@@ -18,4 +18,6 @@ void syscall_close (struct intr_frame *f UNUSED, int fd);
 void syscall_seek(struct intr_frame *f UNUSED, int fd, unsigned position);
 void syscall_tell(struct intr_frame *f, int fd);
 
+bool validate_memory (void* ptr);
+
 #endif /* userprog/syscall.h */

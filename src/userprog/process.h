@@ -22,7 +22,6 @@ struct process
     pid_t pid;                          /* Thread identifier. */
     tid_t tid;
     char name[16];                      /* Name. */
-    // char arg1[8];
 
 	int load;
 	int exit_status;
@@ -44,12 +43,14 @@ struct file_node {
 	int magic;
 };
 
-void init_pcb(struct process *pcb, char* name);
+void init_pcb(struct process *pcb, const char* name);
 void process_init(void);
 struct process* process_current(void);
 struct file_node* get_file_of_process(int fd);
 
-void print_process(void);
+void print_all(void);
+void print_process(struct process *p);
+
 bool is_executable (struct file* fs);
 bool is_running (const char* file_name);
 struct process *get_child_process_by_tid (tid_t tid);
@@ -57,7 +58,4 @@ struct process *lookup_process_by_pid (pid_t pid);
 
 void remove_child_list (struct process*);
 
-struct semaphore process_sema; // sync for execution
-
-#define VERBOSE 0
 #endif /* userprog/process.h */

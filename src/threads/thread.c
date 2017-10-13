@@ -27,7 +27,6 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list all_list;
-static struct list dead_list;
 static struct list ready_list;
 
 /* List of processes in sleeping state */
@@ -99,7 +98,6 @@ thread_init (void)
   list_init (&ready_list);
   list_init (&sleep_list);
   list_init (&all_list);
-  list_init (&dead_list);
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
@@ -299,10 +297,10 @@ thread_exit (void)
   /* Just set our status to dying and schedule another process.
      We will be destroyed during the call to schedule_tail(). */
   struct thread *curr = thread_current();
+  ASSERT(curr);
   intr_disable ();
   list_remove(&curr->all_elem);
   thread_current ()->status = THREAD_DYING;
-  list_push_back(&dead_list, &curr->all_elem);
   schedule ();
   NOT_REACHED ();
 }
@@ -360,9 +358,7 @@ thread_get_priority (void)
 void
 thread_change_priority (struct thread *t, int new_priority) 
 {
-  int temp = t->priority;
   t->priority = new_priority;
-  //printf("Thread %d -> %d\n", temp, new_priority);
   enum intr_level old_level;
   old_level = intr_disable ();
   list_sort(&ready_list, compare_priority, NULL);
@@ -494,7 +490,10 @@ bool thread_is_alive (tid_t tid) {
   struct list_elem* e;
   //printf("%d\n", list_size(&all_list));
   for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e))
-  {
+  { 
+    struct thread *t = list_entry(e, struct thread, all_elem);
+    //printf("thread: %x\n",t);
+    ASSERT(t);
     if (list_entry(e, struct thread, all_elem)->tid == tid)
       return true;
   }
@@ -508,21 +507,6 @@ struct thread *lookup_all_list(tid_t tid) {
   }
 
   for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e))
-  {
-    struct thread *t = list_entry(e, struct thread, all_elem);
-    if (t->tid == tid)
-      return t;
-  }
-  return NULL;
-}
-
-struct thread *lookup_dead_list(tid_t tid) {
-  struct list_elem* e;
-  if (list_empty(&dead_list)){
-    return NULL;
-  }
-
-  for (e = list_begin (&dead_list); e != list_end (&dead_list); e = list_next (e))
   {
     struct thread *t = list_entry(e, struct thread, all_elem);
     if (t->tid == tid)
@@ -547,6 +531,18 @@ struct thread* lookup_thread_by_pid (pid_t pid) {
   return NULL;
 }
 #endif
+
+void print_all_threaed (void){
+  struct list_elem* e;
+  printf("All threaed list (tid): ");
+  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e))
+  {
+    struct thread *t = list_entry(e, struct thread, all_elem);
+    printf("[%d], ", t->tid);
+  }
+  printf("\n\n");
+
+}
 
 /******************************************************************************************/
 

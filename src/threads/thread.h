@@ -163,10 +163,11 @@ void remove_ordered_list (int *list, int e);
 
 bool thread_is_alive (tid_t tid);
 struct thread *lookup_all_list(tid_t tid);
-struct thread *lookup_dead_list(tid_t tid);
+
+void print_all_threaed(void);
 
 #ifdef USERPROG
 struct thread* lookup_thread_by_pid (pid_t pid);
-#endif USERPROG
+#endif
 
 #endif /* threads/thread.h */

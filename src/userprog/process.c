@@ -26,8 +26,6 @@ static pid_t allocate_pid (void);
 static struct list process_list;
 static bool install_page (void *upage, void *kpage, bool writable);
 
-struct lock process_lock;
-
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -42,6 +40,7 @@ process_execute (const char *cmd_line)
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL) {
+    // fn_copy ALLOCATION FAIL
     return TID_ERROR;
   }
   strlcpy (fn_copy, cmd_line, PGSIZE);
@@ -50,7 +49,6 @@ process_execute (const char *cmd_line)
   struct process *pcb = malloc(sizeof(struct process));
   ASSERT(pcb);
   init_pcb(pcb, cmd_line);
-  if (VERBOSE) printf("(%s) pid: %d, ", pcb->name, pcb->pid);
 
   if (pcb->pid == 1) { // starter process
     process_init();
@@ -64,18 +62,24 @@ process_execute (const char *cmd_line)
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (cmd_line, PRI_DEFAULT, start_process, fn_copy);
+  if (tid == TID_ERROR) {
+    // Thread Creation FAIL
+    // Remove p on list
+    list_remove(&pcb->elem); // from process_list
+    
+    //free resource
+    remove_child_list(pcb);
+
+    palloc_free_page (fn_copy); 
+    free (pcb);
+    return TID_ERROR;
+  }
+
   pcb->tid = tid;
   struct thread *child_t = lookup_all_list(tid);
   ASSERT(child_t != NULL);
   child_t->pid = pcb->pid;
 
-  if (tid == TID_ERROR) {
-    printf("%ASDASDSADSADSADSAD\n");
-    palloc_free_page (fn_copy); 
-    free (pcb);
-  }
-
-  // print_process();
   return tid;
 }
 
@@ -94,9 +98,8 @@ start_process (void *f_name)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
 
-  char *argv, *save_ptr;
+  char *save_ptr;
   int argc = 0;
-  int stack_offset = 0;
   int len = 0;
 
 
@@ -104,8 +107,6 @@ start_process (void *f_name)
   success = load (file_name, &if_.eip, &if_.esp);
 
   if (success) {
-    process_current()->load = LOAD_SUCESS;
-    // sema_up(&process_sema);
     while(cmd_line) {
       argc++;
       len += strlen(cmd_line)+1;
@@ -115,7 +116,6 @@ start_process (void *f_name)
     // insert to stack pointer
     int i = 0;
     int arg_index = 0;
-    int j=0;
     char* cp_index = if_.esp - len;
     int argv_0 = (ROUND_DOWN((unsigned int)cp_index, 4) - 4 * (argc + 1 - arg_index));
     for (arg_index = 0; arg_index < argc; arg_index++) {
@@ -124,10 +124,6 @@ start_process (void *f_name)
       *(int *) (argv_0 + 4 *arg_index) = (int) (cp_index + i);
       while(*file_name) {
         *(cp_index+i) = *file_name;
-        if (arg_index ==1){
-          // (process_current()->arg1)[j] = *file_name;
-          // j++;
-        }
         file_name++;
         i++;
       }
@@ -136,27 +132,26 @@ start_process (void *f_name)
     }
     *(int *)(argv_0 - 4) = argv_0;
     *(int *)(argv_0 - 8) = argc;
-    if_.esp = argv_0 - 12;
+    if_.esp = (void *)(argv_0 - 12);
 
 
-
-    palloc_free_page (cmd_line); 
+    process_current()->load = LOAD_SUCESS;
+    palloc_free_page (f_name); 
     //hex_dump (if_.esp, if_.esp, PHYS_BASE - if_.esp, 1);
   } else {
     /* If load failed, quit. */
     struct process *p = process_current();
-    p->load = LOAD_FAIL;
 
-    
     // Remove p on list
-    list_remove(&p->elem_heir); // from parent's child_lsit
     list_remove(&p->elem); // from process_list
     
     //free resource
     remove_child_list(p);
     free(p);
 
-    palloc_free_page (cmd_line); 
+    palloc_free_page (f_name); 
+    p->load = LOAD_FAIL;
+
     thread_exit ();
   } 
 
@@ -191,20 +186,18 @@ process_wait (tid_t child_tid)
     thread_yield();
 
   // Remove child_process on list
-  list_remove(&child_process->elem_heir); // from parent's child_lsit
   list_remove(&child_process->elem); // from process_list
 
   remove_child_list(child_process);
   int exit_status = child_process->exit_status;
   free (child_process);
 
-  //print_process(); 
-
   return exit_status;
 
 }
 
 void remove_child_list(struct process *p){
+  list_remove(&p->elem_heir); // from parent's child_lsit
   struct list_elem *e;
   for (e = list_begin (&p->child_list); e != list_end (&p->child_list); e = list_next (e))
   {
@@ -231,6 +224,12 @@ process_exit (void)
       struct file_node* fn = list_entry(list_pop_back(&pcb->fd_list), struct file_node, elem); 
       file_close(fn->file);
       free(fn);
+    }
+
+    if (pcb->parent == NULL) { 
+      // no parent waiting this process, so free resources
+      list_remove(&pcb->elem);
+      free(pcb);
     }
   }
 
@@ -268,13 +267,14 @@ process_activate (void)
   tss_update ();
 }
 
-void init_pcb(struct process *pcb, char* name){
+void init_pcb(struct process *pcb, const char* name){
   memset(pcb, 0, sizeof *pcb);
   pcb->pid = allocate_pid();
 
   // Parse program name
   char* save_ptr;
-  char* name_copy = malloc(strlen(name)+1);
+  char* ptr = malloc(strlen(name)+1);
+  char* name_copy = ptr;
   memset(name_copy, 0, strlen(name)+1);
   strlcpy (name_copy, name, strlen(name)+1);
   char *file_name = strtok_r(name_copy, " ", &save_ptr);
@@ -289,7 +289,7 @@ void init_pcb(struct process *pcb, char* name){
   list_init(&pcb->fd_list);
   pcb->fd_num = 2;
 
-  free(name_copy);
+  free(ptr);
 }
 
 struct process* process_current(void){
@@ -319,44 +319,47 @@ void process_init(void) {
   root_pcb->fd_num = 2;
   root_pcb->load = LOAD_SUCESS;
   root_pcb->tid = thread_current()->tid;
-
-  sema_init(&process_sema, 0);
-  lock_init(&process_lock);  
 }
 
-void print_process(void){
+void print_all(void){
   struct list_elem* e;
-  struct list_elem* e2;
-  struct list_elem* e3;
   for (e = list_begin (&process_list); e != list_end (&process_list); e = list_next (e))
   {
     struct process *pcb = list_entry(e, struct process, elem);
-    printf("[pid:%d, tid:%d]:\tparent: ", pcb->pid, pcb->tid);
-    if (pcb->parent == NULL) {
-      printf("NULL,\t");
-    } else {
-      printf("%d,\t",pcb->parent->pid);
-    }
-    printf("child: ["); 
-    if (!list_empty(&pcb->child_list)) {
-      for (e2 = list_begin (&pcb->child_list); e2 != list_end (&pcb->child_list); e2 = list_next (e2))
-      {
-        struct process *child_pcb = list_entry(e2, struct process, elem_heir);
-        printf("%d, ", child_pcb->pid);
-      }
-    }
-    printf("], ");
-
-    printf("fd_list: ["); 
-    if (!list_empty(&pcb->fd_list)) {
-      for (e3 = list_begin (&pcb->fd_list); e3 != list_end (&pcb->fd_list); e3 = list_next (e3))
-      {
-        struct file_node *fe = list_entry(e3, struct file_node, elem);
-        printf("%d, ", fe->fd);
-      }
-    }
-    printf("]\n");
+    print_process(pcb);
   }
+  printf("\n");
+}
+
+void print_process(struct process *pcb){
+  struct list_elem* e2;
+  struct list_elem* e3;
+
+  printf("[pid:%03d, tid:%03d]:\tparent: ", pcb->pid, pcb->tid);
+  if (pcb->parent == NULL) {
+    printf("NULL,\t");
+  } else {
+    printf("%d,\t",pcb->parent->pid);
+  }
+  printf("child: ["); 
+  if (!list_empty(&pcb->child_list)) {
+    for (e2 = list_begin (&pcb->child_list); e2 != list_end (&pcb->child_list); e2 = list_next (e2))
+    {
+      struct process *child_pcb = list_entry(e2, struct process, elem_heir);
+      printf("%d, ", child_pcb->pid);
+    }
+  }
+  printf("], ");
+
+  printf("fd_list: ["); 
+  if (!list_empty(&pcb->fd_list)) {
+    for (e3 = list_begin (&pcb->fd_list); e3 != list_end (&pcb->fd_list); e3 = list_next (e3))
+    {
+      struct file_node *fe = list_entry(e3, struct file_node, elem);
+      printf("%d, ", fe->fd);
+    }
+  }
+  printf("]\n");
 }
 
 /* Returns a pid to use for a new process. */

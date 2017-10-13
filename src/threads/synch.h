@@ -53,7 +53,7 @@ struct semaphore_elem
   {
     struct list_elem elem;              /* List element. */
     struct semaphore semaphore;         /* This semaphore. */
-    int priority                        /* Priority for semaphore */
+    int priority;                        /* Priority for semaphore */
   };
 
 /* Optimization barrier.

@@ -11,6 +11,9 @@
 #include "threads/synch.h"
 #include "string.h"
 #include "threads/malloc.h"
+#include "devices/input.h"
+#include "userprog/pagedir.h"
+#include "threads/init.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -30,31 +33,13 @@ syscall_exit(struct intr_frame *f UNUSED, int status) {
 }
 
 void syscall_exec (struct intr_frame *f, const char *cmd_line) {
-	// Parse program name
-	/*
-	char* save_ptr;
-	char* cmd_copy = malloc(strlen(cmd_line));
-	strlcpy (cmd_copy, cmd_line, PGSIZE);
-	char *file_name = strtok_r(cmd_copy, " ", &save_ptr);
-
-	
-	struct file* file;
-	if ((file = filesys_open(file_name)) == NULL) { 
-		// file doesn't exist
+	tid_t tid = process_execute(cmd_line);
+	if (tid == TID_ERROR){
 		f->eax = -1;
-		free(cmd_copy);
-		file_close(file);
 		return;
 	}
 
-	file_close(file);
-	free(cmd_copy);*/
-
-	//print_process();
-	tid_t tid = process_execute(cmd_line);
-	
-	struct process* child_process = get_child_process_by_tid(tid);
-	ASSERT(child_process);
+	struct process* child_process = get_child_process_by_tid(tid);	
 
 	// Suspend execution until child_process is load
 	while (child_process->load == NOT_LOAD) {
@@ -62,9 +47,9 @@ void syscall_exec (struct intr_frame *f, const char *cmd_line) {
 	}
 	// TO DO: Synch?
 	if (child_process->load == LOAD_SUCESS) {
+		// LOAD Success
 		f->eax = child_process->pid;
 	} else {
-		// LOAD Success
 		f->eax = -1;
 	}
 } 
@@ -99,6 +84,7 @@ void syscall_open (struct intr_frame *f, const char* file_name) {
 	// file is invaild
 	if(fs == NULL) {
 		f->eax = -1;
+		free(fn);
 		return;
 	}
 
@@ -243,7 +229,7 @@ syscall_handler (struct intr_frame *f)
 			buf_index = 1;
 	}
 	if (buf_index != 0) {
-		if (!validate_memory(*(st+buf_index))){
+		if (!validate_memory((void *)*(st+buf_index))){
 			thread_exit();
 		}
 	}
@@ -258,7 +244,7 @@ syscall_handler (struct intr_frame *f)
 			syscall_exit(f, *(st+1));
 			break;
 		case SYS_EXEC :
-			syscall_exec(f, *(st+1));
+			syscall_exec(f, (const char *)*(st+1));
 			break;
 		case SYS_WAIT :
 			syscall_wait(f, (pid_t)*(st+1));
