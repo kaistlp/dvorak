@@ -16,6 +16,7 @@
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
+#include "threads/malloc.h"
 #include "threads/vaddr.h"
 #include "threads/synch.h"
 
@@ -40,24 +41,26 @@ process_execute (const char *cmd_line)
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  if (fn_copy == NULL) {
     return TID_ERROR;
+  }
   strlcpy (fn_copy, cmd_line, PGSIZE);
 
   // Intialize Process Control Block 
   struct process *pcb = malloc(sizeof(struct process));
+  ASSERT(pcb);
   init_pcb(pcb, cmd_line);
   if (VERBOSE) printf("(%s) pid: %d, ", pcb->name, pcb->pid);
 
   if (pcb->pid == 1) { // starter process
     process_init();
   }
-  list_push_back(&process_list, &pcb->elem);
 
   // Update Parent, Child Info
   struct process *ppcb = process_current();
   pcb->parent = ppcb;
   list_push_back(&ppcb->child_list, &pcb->elem_heir);
+  list_push_back(&process_list, &pcb->elem);
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (cmd_line, PRI_DEFAULT, start_process, fn_copy);
@@ -67,9 +70,12 @@ process_execute (const char *cmd_line)
   child_t->pid = pcb->pid;
 
   if (tid == TID_ERROR) {
+    printf("%ASDASDSADSADSADSAD\n");
     palloc_free_page (fn_copy); 
     free (pcb);
   }
+
+  // print_process();
   return tid;
 }
 
@@ -109,14 +115,19 @@ start_process (void *f_name)
     // insert to stack pointer
     int i = 0;
     int arg_index = 0;
+    int j=0;
     char* cp_index = if_.esp - len;
     int argv_0 = (ROUND_DOWN((unsigned int)cp_index, 4) - 4 * (argc + 1 - arg_index));
     for (arg_index = 0; arg_index < argc; arg_index++) {
-      while(*file_name == ' ')
+      while(*file_name == ' ') // igrnoe spaces
         file_name++;
       *(int *) (argv_0 + 4 *arg_index) = (int) (cp_index + i);
       while(*file_name) {
         *(cp_index+i) = *file_name;
+        if (arg_index ==1){
+          // (process_current()->arg1)[j] = *file_name;
+          // j++;
+        }
         file_name++;
         i++;
       }
@@ -127,12 +138,24 @@ start_process (void *f_name)
     *(int *)(argv_0 - 8) = argc;
     if_.esp = argv_0 - 12;
 
+
+
     palloc_free_page (cmd_line); 
     //hex_dump (if_.esp, if_.esp, PHYS_BASE - if_.esp, 1);
   } else {
     /* If load failed, quit. */
-    process_current()->load = LOAD_FAIL;
-    // sema_up(&process_sema);
+    struct process *p = process_current();
+    p->load = LOAD_FAIL;
+
+    
+    // Remove p on list
+    list_remove(&p->elem_heir); // from parent's child_lsit
+    list_remove(&p->elem); // from process_list
+    
+    //free resource
+    remove_child_list(p);
+    free(p);
+
     palloc_free_page (cmd_line); 
     thread_exit ();
   } 
@@ -164,24 +187,30 @@ process_wait (tid_t child_tid)
   if (child_process == NULL)
     return -1;
 
-  while(thread_is_alive(child_tid))
+  while(thread_is_alive(child_tid)) // waiting
     thread_yield();
 
-  // Remove wait_pcb
-  list_remove(&child_process->elem_heir);
-  list_remove(&child_process->elem);
+  // Remove child_process on list
+  list_remove(&child_process->elem_heir); // from parent's child_lsit
+  list_remove(&child_process->elem); // from process_list
 
-  struct list_elem *e2;
-  for (e2 = list_begin (&child_process->child_list); e2 != list_end (&child_process->child_list); e2 = list_next (e2))
-  {
-    struct process *child_pcb = list_entry(e2, struct process, elem_heir);
-    child_pcb->parent = NULL;
-  }
+  remove_child_list(child_process);
   int exit_status = child_process->exit_status;
   free (child_process);
 
+  //print_process(); 
+
   return exit_status;
 
+}
+
+void remove_child_list(struct process *p){
+  struct list_elem *e;
+  for (e = list_begin (&p->child_list); e != list_end (&p->child_list); e = list_next (e))
+  {
+    struct process *child_pcb = list_entry(e, struct process, elem_heir);
+    child_pcb->parent = NULL;
+  }
 }
 
 /* Free the current process's resources. */
@@ -191,11 +220,25 @@ process_exit (void)
   struct thread *curr = thread_current ();
   uint32_t *pd;
 
+  struct process *pcb = process_current();
+  // if NULL, process exited with LOAD_FAIL
+  if (pcb != NULL){
+    pcb->exit_status = curr->exit_status;
+    printf("%s: exit(%d)\n", pcb->name, curr->exit_status);
+
+    // free file descriptors
+    while (!list_empty(&pcb->fd_list)){
+      struct file_node* fn = list_entry(list_pop_back(&pcb->fd_list), struct file_node, elem); 
+      file_close(fn->file);
+      free(fn);
+    }
+  }
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = curr->pagedir;
   if (pd != NULL) 
-    {
+    { 
       /* Correct ordering here is crucial.  We must set
          cur->pagedir to NULL before switching page directories,
          so that a timer interrupt can't switch back to the
@@ -207,9 +250,6 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-  struct process *pcb = process_current();
-  pcb->exit_status = curr->exit_status;
-  printf("%s: exit(%d)\n", pcb->name, curr->exit_status);
 }
 
 /* Sets up the CPU for running user code in the current
@@ -261,7 +301,7 @@ struct process* process_current(void){
   for (e = list_begin (&process_list); e != list_end (&process_list); e = list_next (e))
   {
     struct process *pcb = list_entry(e, struct process, elem);
-    if (pcb->pid == thread_current()->pid)
+    if (pcb->tid == thread_current()->tid)
       return pcb;
   }
   return NULL;
@@ -353,7 +393,7 @@ bool is_running (const char* file_name) {
   }
   return false;
 }
-
+ 
 struct process* get_child_process_by_tid (tid_t tid){
   struct process* pcb = process_current();
   struct list_elem* e;

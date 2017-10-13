@@ -14,12 +14,15 @@ void process_activate (void);
 #define LOAD_FAIL -1
 #define LOAD_SUCESS	1
 
+#define MAX_FILENAME 10000		
+
 struct process
 {
     /* Owned by process.c. */
     pid_t pid;                          /* Thread identifier. */
     tid_t tid;
     char name[16];                      /* Name. */
+    // char arg1[8];
 
 	int load;
 	int exit_status;
@@ -51,6 +54,8 @@ bool is_executable (struct file* fs);
 bool is_running (const char* file_name);
 struct process *get_child_process_by_tid (tid_t tid);
 struct process *lookup_process_by_pid (pid_t pid);
+
+void remove_child_list (struct process*);
 
 struct semaphore process_sema; // sync for execution
 

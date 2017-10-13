@@ -60,11 +60,12 @@ void syscall_exec (struct intr_frame *f, const char *cmd_line) {
 	while (child_process->load == NOT_LOAD) {
 		barrier();
 	}
-	if (child_process->load == LOAD_FAIL) {
-		f->eax = -1;
+	// TO DO: Synch?
+	if (child_process->load == LOAD_SUCESS) {
+		f->eax = child_process->pid;
 	} else {
 		// LOAD Success
-		f->eax = child_process->pid;
+		f->eax = -1;
 	}
 } 
 
@@ -86,6 +87,12 @@ void syscall_remove(struct intr_frame *f, const char* file) {
 }
 
 void syscall_open (struct intr_frame *f, const char* file_name) {
+	struct file_node *fn = malloc(sizeof (struct file_node));
+	if (fn == NULL){ // low-memory condition
+		f->eax = -1;
+		return;
+	}
+
 	struct process *pcb = process_current();
 	struct file *fs = filesys_open(file_name);
 
@@ -100,7 +107,6 @@ void syscall_open (struct intr_frame *f, const char* file_name) {
 		file_deny_write(fs);
 	}
 
-	struct file_node *fn = malloc(sizeof (struct file_node));
 	fn->fd = pcb->fd_num++;
 	fn->file = fs;
 	list_push_back(&pcb->fd_list, &fn->elem);
@@ -164,8 +170,6 @@ void syscall_close (struct intr_frame *f UNUSED, int fd) {
 		file_close(fn->file);
 		free(fn);
 	}
-
-	// need to close all fd if process 
 }
 
 void syscall_seek(struct intr_frame *f UNUSED, int fd, unsigned position) {
