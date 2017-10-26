@@ -23,7 +23,7 @@
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static pid_t allocate_pid (void);
-static struct list process_list;
+static struct list process_list; // Process list of running
 static bool install_page (void *upage, void *kpage, bool writable);
 
 /* Starts a new thread running a user program loaded from
@@ -32,7 +32,7 @@ static bool install_page (void *upage, void *kpage, bool writable);
    thread id, or TID_ERROR if the thread cannot be created. */
 tid_t
 process_execute (const char *cmd_line) 
-{
+{  
   char *fn_copy;
   tid_t tid;
 
@@ -40,7 +40,7 @@ process_execute (const char *cmd_line)
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL) {
-    // fn_copy ALLOCATION FAIL
+    if (VERBOSE) printf("fn_copy ALLOCATION FAIL\n");
     return TID_ERROR;
   }
   strlcpy (fn_copy, cmd_line, PGSIZE);
@@ -49,7 +49,7 @@ process_execute (const char *cmd_line)
   struct process *pcb = malloc(sizeof(struct process));
   ASSERT(pcb);
   init_pcb(pcb, cmd_line);
-
+  
   if (pcb->pid == 1) { // starter process
     process_init();
   }
@@ -63,10 +63,10 @@ process_execute (const char *cmd_line)
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (cmd_line, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR) {
-    // Thread Creation FAIL
+    if (VERBOSE) printf("Thread Creation FAIL\n");
     // Remove p on list
     list_remove(&pcb->elem); // from process_list
-    
+
     //free resource
     remove_child_list(pcb);
 
@@ -74,6 +74,7 @@ process_execute (const char *cmd_line)
     free (pcb);
     return TID_ERROR;
   }
+  
 
   pcb->tid = tid;
   struct thread *child_t = lookup_all_list(tid);
@@ -133,10 +134,12 @@ start_process (void *f_name)
     *(int *)(argv_0 - 4) = argv_0;
     *(int *)(argv_0 - 8) = argc;
     if_.esp = (void *)(argv_0 - 12);
+    printf("st: %lx\n", if_.esp);
 
 
     process_current()->load = LOAD_SUCESS;
     palloc_free_page (f_name); 
+
     //hex_dump (if_.esp, if_.esp, PHYS_BASE - if_.esp, 1);
   } else {
     /* If load failed, quit. */
@@ -151,7 +154,7 @@ start_process (void *f_name)
 
     palloc_free_page (f_name); 
     p->load = LOAD_FAIL;
-
+    if (VERBOSE) printf("LOAD_FAIL\n");
     thread_exit ();
   } 
 
@@ -182,10 +185,15 @@ process_wait (tid_t child_tid)
   if (child_process == NULL)
     return -1;
 
-  while(thread_is_alive(child_tid)) // waiting
-    thread_yield();
+  while(thread_is_alive(child_tid)) { 
+    thread_yield(); // waiting
+  }
 
+  child_process = get_child_process_by_tid(child_tid); // CHECK LOAD_FAIL
+  if (child_process == NULL)
+    return -1;
   // Remove child_process on list
+  ASSERT(&child_process->elem);
   list_remove(&child_process->elem); // from process_list
 
   remove_child_list(child_process);
@@ -270,6 +278,7 @@ process_activate (void)
 void init_pcb(struct process *pcb, const char* name){
   memset(pcb, 0, sizeof *pcb);
   pcb->pid = allocate_pid();
+  pcb->tid = -1; // NOT LOADED
 
   // Parse program name
   char* save_ptr;
@@ -323,6 +332,10 @@ void process_init(void) {
 
 void print_all(void){
   struct list_elem* e;
+  if (list_empty(&process_list)) {
+    printf("[empty]\n");
+    return;
+  }
   for (e = list_begin (&process_list); e != list_end (&process_list); e = list_next (e))
   {
     struct process *pcb = list_entry(e, struct process, elem);

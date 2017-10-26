@@ -68,8 +68,9 @@ consume_some_resources_and_die (int seed)
   consume_some_resources ();
   random_init (seed);
   int *PHYS_BASE = (int *)0xC0000000;
-
-  switch (random_ulong () % 5)
+  unsigned int r = random_ulong () % 5;
+  // printf("%d:\n", r);
+  switch (r)
     {
       case 0:
         *(int *) NULL = 42;

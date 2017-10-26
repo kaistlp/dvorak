@@ -106,10 +106,9 @@ struct thread
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
-    pid_t pid;
+    pid_t pid;                          /* Process identifier */
     uint32_t *pagedir;                  /* Page directory. */
 #endif
-
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
@@ -166,8 +165,6 @@ struct thread *lookup_all_list(tid_t tid);
 
 void print_all_threaed(void);
 
-#ifdef USERPROG
 struct thread* lookup_thread_by_pid (pid_t pid);
-#endif
 
 #endif /* threads/thread.h */

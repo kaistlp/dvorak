@@ -11,9 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
-#ifdef USERPROG
 #include "userprog/process.h"
-#endif
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -515,7 +513,6 @@ struct thread *lookup_all_list(tid_t tid) {
   return NULL;
 }
 
-#ifdef USERPROG
 struct thread* lookup_thread_by_pid (pid_t pid) {
   struct list_elem* e;
   if (list_empty(&all_list)){
@@ -530,7 +527,6 @@ struct thread* lookup_thread_by_pid (pid_t pid) {
   }
   return NULL;
 }
-#endif
 
 void print_all_threaed (void){
   struct list_elem* e;
