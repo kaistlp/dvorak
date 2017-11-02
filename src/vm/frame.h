@@ -10,6 +10,6 @@ struct frame_entry {
 };
 
 void frame_init(void);
-void *frame_alloc(enum palloc_flags, struct process*);
-void frame_free();
+void *frame_alloc(enum palloc_flags);
+void frame_free(void* faddr);
 void frame_dump(void);
