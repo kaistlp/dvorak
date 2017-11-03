@@ -32,6 +32,8 @@ struct process
     struct list_elem elem_heir; 		/* List element for child_list */
 
     struct list fd_list;				/* List of file desciptor (file_noe) */
+
+    void* next_stptr;					/* pointr of next stack */
     
 };
 

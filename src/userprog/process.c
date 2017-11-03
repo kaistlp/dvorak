@@ -242,10 +242,7 @@ process_exit (void)
       free(pcb);
     }
   }
-  page_dump();
-  frame_dump();
-
-  //여기에서 supple로 보고 frame_free외치기
+  // TO DO 여기에서 supple로 보고 frame_free외치기
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -744,13 +741,14 @@ setup_stack (void **esp)
 
   kpage = frame_alloc (PAL_USER | PAL_ZERO);
   if (kpage != NULL) 
-    {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        frame_free (kpage);
-    }
+  {
+    success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+    if (success)
+      *esp = PHYS_BASE;
+    else
+      frame_free (kpage);
+  }
+  process_current()->next_stptr = (void *) ((uintptr_t) PHYS_BASE - 2 * PGSIZE);
   return success;
 }
 
