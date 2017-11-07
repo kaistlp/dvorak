@@ -774,7 +774,9 @@ void insert_ordered_list (int *list , int e){
 }
 
 void remove_ordered_list (int *list, int e) {
-  enum intr_level old_level = intr_disable();
+  if (list == (int*) 0x2c) {
+    barrier();
+  }
   int i,j;
   for (i=0; i< LIST_SIZE; i++){
     if (list[i] == e) {
@@ -785,5 +787,4 @@ void remove_ordered_list (int *list, int e) {
       return;
     }
   }
-  intr_set_level(old_level);
 }

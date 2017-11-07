@@ -34,6 +34,7 @@ struct process
     struct list fd_list;				/* List of file desciptor (file_noe) */
 
     void* next_stptr;					/* pointr of next stack */
+    void* esp;
     
 };
 
@@ -59,6 +60,6 @@ struct process *lookup_process_by_pid (pid_t pid);
 
 void remove_child_list (struct process*);
 
-#define VERBOSE 0
+#define VERBOSE 1
 
 #endif /* userprog/process.h */

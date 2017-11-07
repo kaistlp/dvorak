@@ -5,10 +5,12 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "userprog/process.h"
-#include "vm/frame.h"
-#include "vm/page.h"
 #include "threads/vaddr.h"
 #include "userprog/syscall.h"
+#include "vm/frame.h"
+#include "vm/page.h"
+#include "vm/swap.h"
+#include "userprog/pagedir.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -141,43 +143,60 @@ page_fault (struct intr_frame *f)
      (#PF)". */
   asm ("movl %%cr2, %0" : "=r" (fault_addr));
 
-  /* Turn interrupts back on (they were only off so that we could
-     be assured of reading CR2 before it changed). */
-  intr_enable ();
-  void* stack_base = process_current()->next_stptr + PGSIZE;
-  if (is_kernel_vaddr(fault_addr) || f->esp > fault_addr + 32) {
-    /* Count page faults. */
-    // printf("%%esp: %x\n", f->esp);
+  /* Determine cause. */
+  not_present = (f->error_code & PF_P) == 0;
+  write = (f->error_code & PF_W) != 0;
+  user = (f->error_code & PF_U) != 0;
+
+  if (!not_present) {
     page_fault_cnt++;
-
-    /* Determine cause. */
-    not_present = (f->error_code & PF_P) == 0;
-    write = (f->error_code & PF_W) != 0;
-    user = (f->error_code & PF_U) != 0;
-
-    /* To implement virtual memory, delete the rest of the function
-       body, and replace it with code that brings in the page to
-       which fault_addr refers. */
+    // printf ("Page fault at %p: %s error %s page in %s context.\n",
+    //         fault_addr,
+    //         not_present ? "not present" : "rights violation",
+    //         write ? "writing" : "reading",
+    //         user ? "user" : "kernel");
     if (user)
       kill (f);
     else
       thread_exit();
-    
-    printf ("Page fault at %p: %s error %s page in %s context.\n",
-            fault_addr,
-            not_present ? "not present" : "rights violation",
-            write ? "writing" : "reading",
-            user ? "user" : "kernel");
-  } else {
-    void* kpage = frame_alloc (PAL_USER | PAL_ZERO);
-    if (kpage != NULL) 
-    {
-      struct thread *t = thread_current();
-      bool success = suplpage_set_page(t->pagedir, process_current()->next_stptr, kpage, true);
-      process_current()->next_stptr -= PGSIZE;
+  }
+
+  uintptr_t supladdr = (uintptr_t) pg_round_down(fault_addr) | process_current()->pid;
+
+  struct page *pg = suplpage_lookup((void *)supladdr);
+  
+  /* Turn interrupts back on (they were only off so that we could
+     be assured of reading CR2 before it changed). */
+  intr_enable ();
+  if (pg == NULL) { // New Page
+    if (is_kernel_vaddr(fault_addr) || f->esp > fault_addr + 32) {
+      page_fault_cnt++;
+      
+      if (user)
+        kill (f);
+      else
+        thread_exit();
+      
     } else {
-      // 없으면??
-    } 
+      void* kpage = frame_alloc (PAL_USER | PAL_ZERO);
+      if (kpage != NULL) 
+      {
+        struct thread *t = thread_current();
+        bool success = suplpage_set_page(t->pagedir, process_current()->next_stptr, kpage, true);
+        process_current()->next_stptr -= PGSIZE;
+      } else {
+        printf ("Stack growth failed\n");
+
+      } 
+    }
+  } else {
+    process_current()->esp = f->esp;
+    if (suplpage_get_page(thread_current()->pagedir, pg_round_down(fault_addr)) == NULL) {
+
+      kill (f);
+    } else {
+      process_current()->esp = NULL;
+      return;
+    }
   }
 }
-

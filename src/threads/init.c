@@ -100,6 +100,7 @@ main (void)
   kbd_init ();
   input_init ();
 #ifdef USERPROG
+  process_init();
   exception_init ();
   syscall_init ();
 #endif
@@ -113,6 +114,7 @@ main (void)
   /* Initialize file system. */
   disk_init ();
   filesys_init (format_filesys);
+  swap_init();
 #endif
 
   printf ("Boot complete.\n");

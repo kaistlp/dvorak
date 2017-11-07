@@ -27,6 +27,7 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static pid_t allocate_pid (void);
 static struct list process_list; // Process list of running
 static bool install_page (void *upage, void *kpage, bool writable);
+static struct lock process_lock;
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -51,10 +52,6 @@ process_execute (const char *cmd_line)
   struct process *pcb = malloc(sizeof(struct process));
   ASSERT(pcb);
   init_pcb(pcb, cmd_line);
-  
-  if (pcb->pid == 1) { // starter process
-    process_init();
-  }
 
   // Update Parent, Child Info
   struct process *ppcb = process_current();
@@ -141,6 +138,8 @@ start_process (void *f_name)
 
     process_current()->load = LOAD_SUCESS;
     palloc_free_page (f_name); 
+
+    
 
     //hex_dump (if_.esp, if_.esp, PHYS_BASE - if_.esp, 1);
   } else {
@@ -321,6 +320,7 @@ struct process* process_current(void){
 
 void process_init(void) {
   list_init(&process_list);
+  lock_init(&process_lock);
 
   struct process *root_pcb = malloc(sizeof(struct process));
   root_pcb->pid = 0; // root
@@ -332,7 +332,7 @@ void process_init(void) {
   root_pcb->load = LOAD_SUCESS;
   root_pcb->tid = thread_current()->tid;
 
-  init_page_table();
+  page_table_init();
 }
 
 void print_all(void){
@@ -560,8 +560,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
         goto done;
       file_seek (file, file_ofs);
 
-      if (file_read (file, &phdr, sizeof phdr) != sizeof phdr)
+      if (file_read (file, &phdr, sizeof phdr) != sizeof phdr) {
+
         goto done;
+      }
       file_ofs += sizeof phdr;
       switch (phdr.p_type) 
         {
@@ -600,8 +602,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
                   zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
                 }
               if (!load_segment (file, file_page, (void *) mem_page,
-                                 read_bytes, zero_bytes, writable))
-                goto done;
+                                 read_bytes, zero_bytes, writable)) {
+                if (VERBOSE) printf("Segment Load Failed\n");
+                  goto done;
+              }
             }
           else
             goto done;
@@ -610,8 +614,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp)){
+    if (VERBOSE) printf("Stack Failed\n");
     goto done;
+  }
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -695,6 +701,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (ofs % PGSIZE == 0);
 
   file_seek (file, ofs);
+
   while (read_bytes > 0 || zero_bytes > 0) 
     {
       /* Do calculate how to fill this page.
@@ -705,8 +712,11 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
       /* Get a page of memory. */
       uint8_t *kpage = frame_alloc (PAL_USER);
-      if (kpage == NULL)
+      if (kpage == NULL) {
+        if (VERBOSE) printf("frame allocation error\n");
+        disk_print_stats();
         return false;
+      }
 
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
