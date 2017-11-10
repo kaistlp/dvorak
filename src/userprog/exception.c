@@ -89,13 +89,14 @@ kill (struct intr_frame *f)
   /* The interrupt frame's code segment value tells us where the
      exception originated. */
   switch (f->cs)
-    {
+    { 
     case SEL_UCSEG:
       /* User's code segment, so it's a user exception, as we
          expected.  Kill the user process.  */
       printf ("%s: dying due to interrupt %#04x (%s).\n",
               thread_name (), f->vec_no, intr_name (f->vec_no));
       intr_dump_frame (f);
+
       thread_exit (); 
 
     case SEL_KCSEG:
@@ -142,11 +143,11 @@ page_fault (struct intr_frame *f)
      [IA32-v3a] 5.15 "Interrupt 14--Page Fault Exception
      (#PF)". */
   asm ("movl %%cr2, %0" : "=r" (fault_addr));
-
   /* Determine cause. */
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
+ // page_dump();
 
   if (!not_present) {
     page_fault_cnt++;
@@ -160,7 +161,7 @@ page_fault (struct intr_frame *f)
     else
       thread_exit();
   }
-
+  
   uintptr_t supladdr = (uintptr_t) pg_round_down(fault_addr) | process_current()->pid;
 
   struct page *pg = suplpage_lookup((void *)supladdr);
@@ -171,7 +172,7 @@ page_fault (struct intr_frame *f)
   if (pg == NULL) { // New Page
     if (is_kernel_vaddr(fault_addr) || f->esp > fault_addr + 32) {
       page_fault_cnt++;
-      
+      //page_dump();
       if (user)
         kill (f);
       else

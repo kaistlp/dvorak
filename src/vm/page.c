@@ -11,6 +11,10 @@
 
 struct hash pages;
 char* loc_str[3] = {"MEMORY", "DISK", "INVAILD"};
+static struct lock page_lock;
+static int time = 0;
+
+struct page *lookup_pid (int pid);
 
 unsigned page_hash (const struct hash_elem *p_, void *aux UNUSED) {
 	const struct page *p = hash_entry (p_, struct page, hash_elem);
@@ -24,6 +28,7 @@ bool page_less (const struct hash_elem *a_, const struct hash_elem *b_, void *au
 }
 
 void page_table_init (void){
+	lock_init(&page_lock);
 	hash_init(&pages, page_hash, page_less, NULL);
 }
 
@@ -33,6 +38,26 @@ struct page * suplpage_lookup (const void *supladdr) {
 	p.addr = supladdr;
 	e = hash_find(&pages, &p.hash_elem);
 	return e != NULL ? hash_entry(e, struct page, hash_elem) : NULL;
+}
+
+void suplpage_process_exit () {
+	struct hash_iterator i;
+	hash_first(&i, &pages);
+	struct page *p;
+	while (p = lookup_pid(process_current()->pid)) {
+		suplpage_clear_page(thread_current()->pagedir, pg_round_down(p->addr));
+	}
+}
+
+struct page *lookup_pid (int pid) {
+	struct hash_iterator i;
+	hash_first(&i, &pages);
+	while (hash_next(&i)) {
+		struct page *p = hash_entry(hash_cur(&i), struct page, hash_elem);
+		if (p->pid == pid)
+			return p;
+	}
+	return NULL;
 }
 
 void page_dump (void) {
@@ -60,17 +85,23 @@ void page_print(struct page* p) {
 }
 
 void* suplpage_get_page(uint32_t *pd, const void* upage) {
-	void* suplpage = supladdr(upage, process_current()->pid);
+	//printf("va is %x", upage);
+	//printf(" and pid %d\n", process_current()->pid);
+	void* suplpage = (void *) supladdr(upage, process_current()->pid);
 	struct page *pg = suplpage_lookup(suplpage);
 	if (pg == NULL) {
 		return NULL;
 	}
 
+	pg->updated_time = time;
+	time++;
 	if (pg->location == MEMORY) {
 		return pagedir_get_page(pd, upage);
 	} else if (pg->location == DISK) {
 		// swap out
+		lock_acquire(&page_lock);
 		void* kpage = frame_alloc(PAL_USER);
+		lock_release(&page_lock);
 		if (!kpage) {
 			printf("Alloc failed\n");
 			return NULL;
@@ -95,6 +126,8 @@ bool suplpage_set_page(uint32_t *pd, void* upage, void *kpage, bool rw) {
 	p->addr = (void *) supladdr(upage, p->pid);
 	p->location = MEMORY;
 	p->kpage = kpage;
+	p->updated_time = time;
+	time++;
 	hash_insert(&pages, &p->hash_elem);
 
 	bool success = pagedir_set_page(pd, upage, kpage, rw);
@@ -106,30 +139,39 @@ bool suplpage_set_page(uint32_t *pd, void* upage, void *kpage, bool rw) {
 }
 
 void suplpage_clear_page(uint32_t *pd, void *upage) {
-	struct page *pg = suplpage_lookup(upage);
+	void* suplpage = supladdr(upage, process_current()->pid);
+	struct page *pg = suplpage_lookup(suplpage);
 	if (pg->location == MEMORY) {
 		pagedir_clear_page(pd, upage);
+		frame_free(pg->kpage);
 	} else if (pg->location == DISK) {
-		// TO DO : swap에서 찾아오기
-	} 
+		swap_clear(pg->addr);
+	}
+	hash_delete(&pages, &pg->hash_elem);
+	free(pg);
 }
 
 struct page* suplpage_get_victim (void) {
 	if (hash_empty(&pages))
 		return NULL;
 
-	// TO DO: Eviction Algorithm
+	struct page *page_victim = NULL;
 	struct hash_iterator i;
 	hash_first(&i, &pages);
 	while (hash_next(&i)) {
 		struct page *p = hash_entry(hash_cur(&i), struct page, hash_elem);
-		struct process *curr_p = process_current();
-		if (curr_p->esp != NULL && p->addr == (void *)supladdr(curr_p->esp, curr_p->pid) )
+		if (p->location == DISK)
 			continue;
-		if (p->location == MEMORY)
-			return p;
+
+		if (!page_victim)
+			page_victim = p;
+		else {
+			if (page_victim->updated_time > p->updated_time) {
+				page_victim = p;
+			}
+		}
 	}
-	return NULL;
+	return page_victim;
 	
 }
 

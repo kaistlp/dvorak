@@ -1,0 +1,1 @@
+pintos -v -k -T 300  --fs-disk=2 -p tests/vm/$1 -a $1 --swap-disk=4 -- -q   -f run $1

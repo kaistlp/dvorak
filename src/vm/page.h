@@ -13,6 +13,7 @@ enum page_location {
 struct page {
 	enum page_location location;
 	int pid;
+	int updated_time;
 
 	const void *addr;
 	void *kpage;
@@ -26,9 +27,11 @@ void page_dump (void);
 bool suplpage_set_page(uint32_t *pd, void* upage, void *kpage, bool rw);
 void* suplpage_get_page(uint32_t *pd, const void* upage);
 void suplpage_clear_page(uint32_t *pd, void *upage);
+
 struct page* suplpage_get_victim (void);
 
 struct page * suplpage_lookup (const void *supladdr);
+void suplpage_process_exit ();
 
 uintptr_t supladdr(void* upage, int pid);
 void page_print(struct page* p);

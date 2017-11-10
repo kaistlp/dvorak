@@ -84,6 +84,16 @@ bool swap_out (void* paddr, void* kpage_dest) {
 	return true;
 }
 
+void swap_clear (void* supladdr) {
+	struct swap *s = swap_lookup(supladdr);
+	if (!s)
+		return;
+	size_t idx = s->disk_sec;
+	bitmap_set(swap_disk_map, idx, false);
+	hash_delete(&swaps, &s->hash_elem);
+	free(s);
+}
+
 void swap_dump (void) {
 	printf("<Swap Table>\n");
 	int count = 0;

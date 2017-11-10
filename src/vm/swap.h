@@ -19,3 +19,4 @@ void swap_init(void);
 void swap_dump(void);
 bool swap_insert(const void * supladdr, void *buf);
 bool swap_out(void* supladdr, void* kpage_dest);
+void swap_clear(void* supladdr);

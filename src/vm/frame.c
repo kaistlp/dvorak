@@ -8,10 +8,16 @@
 #include "swap.h"
 
 struct list frame_list;
+struct lock frame_lock;
+struct lock palloc_lock;
+
 void frame_insert(void* faddr);
 
 
 void frame_init(void){
+	lock_init(&frame_lock);
+	lock_init(&palloc_lock);
+	
 	list_init(&frame_list);
 }
 
@@ -23,46 +29,111 @@ void frame_insert(void* faddr) {
 }
 
 void *frame_alloc(enum palloc_flags flag) {
+	lock_acquire(&palloc_lock);
 	void* faddr = palloc_get_page(flag);
+	lock_release(&palloc_lock);
+
 	if (faddr){
+//		printf("alloc:%x\n",faddr);
+
+		lock_acquire(&frame_lock);
 		frame_insert(faddr);
+		lock_release(&frame_lock);
 	} else {
 		// swap
+		lock_acquire(&frame_lock);
 		struct page *victim = suplpage_get_victim();
 		struct thread *thread_victim = lookup_thread_by_pid(victim->pid);
 		/* Insert Swap Table */
 		if (!swap_insert(victim->addr, victim->kpage)) {
 			printf("swap insert failed\n");
+			lock_release(&frame_lock);
 			return NULL; // swap-in failed
 		}
-
 		victim->location = DISK;
+		//printf("victim addr %x \n", pg_round_down(victim->addr));
+		if(thread_victim->pagedir==NULL){
+		  printf("PD is %x, vaddr is %x, \n", thread_victim->pagedir,victim->addr);
+		  page_dump();
+		  PANIC("OUCH!\n");
+		}
 		pagedir_clear_page(thread_victim->pagedir, pg_round_down(victim->addr) );
 		/* Remove from Frame Table */
-		frame_free(victim->kpage);
+		if (frame_lookup(victim->kpage) == NULL) {
+			frame_dump();
+			printf("Pid: %d\n", process_current()->pid);
+			PANIC("victim %08x frame is not in frame table\n", victim->kpage);
+		}
+
+		struct list_elem *e;
+		void* backup=NULL;
+		for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
+		{
+		  struct frame_entry *fte = list_entry(e, struct frame_entry, elem);
+		  if (fte->faddr == victim->kpage){
+		  	list_remove(&fte->elem);
+		  	free(fte);
+//		  	printf("freed:%x\n",victim->kpage);
+		  	//char c = * (char *)victim->kpage;
+		  	//printf("%c",c);
+		  	lock_acquire(&palloc_lock);
+			palloc_free_page(victim->kpage);
+			backup = victim->kpage;
+		  	break;
+		  }
+		}
+		int i = palloc_lookup_index(backup);
 		faddr = palloc_get_page(flag);
+//		printf("alloc:%x\n",faddr);
+		if (faddr == NULL){
+			printf("%d\n", palloc_lookup_index(backup));
+			printf("we freed %x\n", backup);
+			if (palloc_lookup_bit(backup)==true){
+				printf("WHY??\n");
+			}else{
+				printf("Get Page is odd\n");
+			}
+			page_dump();
+			//faddr = palloc_get_page2(flag,i);
+		}
+
+		lock_release(&palloc_lock);
 		ASSERT(faddr != NULL);
 		frame_insert(faddr);
+		lock_release(&frame_lock);
+
 	}
 	return faddr;
 }
 
 void frame_free(void* faddr){
+	lock_acquire(&frame_lock);
 	struct list_elem *e;
+	bool flag = false;
+	struct frame_entry *fte;
 	for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
 	{
-	  struct frame_entry *fte = list_entry(e, struct frame_entry, elem);
+	  fte = list_entry(e, struct frame_entry, elem);
 	  if (fte->faddr == faddr){
-	  	list_remove(&fte->elem);
-	  	free(fte);
-		palloc_free_page(faddr);
 	  	break;
+	  	//list_remove(&fte->elem);
+	  	//free(fte);
+		//palloc_free_page(faddr);
+	  	//break;
 	  }
 	}
-	// printf("frame_free: kpage %08x\n", faddr);
+	  	list_remove(&fte->elem);
+	  	free(fte);
+	  	lock_acquire(&palloc_lock);
+		palloc_free_page(faddr);
+		lock_release(&palloc_lock);
+
+	  	
+	lock_release(&frame_lock);
 }
 
 void frame_dump(void){
+
 	printf("<Frame List>\n");
 	struct list_elem *e;
 	for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
@@ -71,4 +142,29 @@ void frame_dump(void){
 	  printf("[0x%x]: pid %d\n", (uintptr_t) f->faddr, f->pcb->pid);
 	}
 	printf("\n");
+
+}
+
+struct frame_entry* frame_lookup(void* faddr){
+	struct list_elem *e;
+	for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
+	{
+	  struct frame_entry *fte = list_entry(e, struct frame_entry, elem);
+	  if (fte->faddr == faddr)
+	  	return fte;
+	  
+	}
+	return NULL;
+}
+
+struct frame_entry* frame_lookup2(void* faddr){
+	struct list_elem *e;
+	for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
+	{
+	  struct frame_entry *fte = list_entry(e, struct frame_entry, elem);
+	  if (fte->faddr == faddr)
+	  	return fte;
+	  
+	}
+	return NULL;
 }
