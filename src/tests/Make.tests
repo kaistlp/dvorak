@@ -3,7 +3,7 @@
 include $(patsubst %,$(SRCDIR)/%/Make.tests,$(TEST_SUBDIRS))
 
 PROGS = $(foreach subdir,$(TEST_SUBDIRS),$($(subdir)_PROGS))
-TESTS = $(foreach subdir,$(TEST_SUBDIRS),$($(subdir)_TESTS_PART1))
+TESTS = $(foreach subdir,$(TEST_SUBDIRS),$($(subdir)_TESTS))
 EXTRA_GRADES = $(foreach subdir,$(TEST_SUBDIRS),$($(subdir)_EXTRA_GRADES))
 
 OUTPUTS = $(addsuffix .output,$(TESTS) $(EXTRA_GRADES))

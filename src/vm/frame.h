@@ -14,4 +14,3 @@ void *frame_alloc(enum palloc_flags);
 void frame_free(void* faddr);
 void frame_dump(void);
 struct frame_entry* frame_lookup(void* faddr);
-struct frame_entry* frame_lookup2(void* faddr);

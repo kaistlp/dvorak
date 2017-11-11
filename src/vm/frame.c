@@ -13,7 +13,6 @@ struct lock palloc_lock;
 
 void frame_insert(void* faddr);
 
-
 void frame_init(void){
 	lock_init(&frame_lock);
 	lock_init(&palloc_lock);
@@ -34,8 +33,6 @@ void *frame_alloc(enum palloc_flags flag) {
 	lock_release(&palloc_lock);
 
 	if (faddr){
-//		printf("alloc:%x\n",faddr);
-
 		lock_acquire(&frame_lock);
 		frame_insert(faddr);
 		lock_release(&frame_lock);
@@ -44,6 +41,7 @@ void *frame_alloc(enum palloc_flags flag) {
 		lock_acquire(&frame_lock);
 		struct page *victim = suplpage_get_victim();
 		struct thread *thread_victim = lookup_thread_by_pid(victim->pid);
+		
 		/* Insert Swap Table */
 		if (!swap_insert(victim->addr, victim->kpage)) {
 			printf("swap insert failed\n");
@@ -51,54 +49,23 @@ void *frame_alloc(enum palloc_flags flag) {
 			return NULL; // swap-in failed
 		}
 		victim->location = DISK;
-		//printf("victim addr %x \n", pg_round_down(victim->addr));
-		if(thread_victim->pagedir==NULL){
-		  printf("PD is %x, vaddr is %x, \n", thread_victim->pagedir,victim->addr);
-		  page_dump();
-		  PANIC("OUCH!\n");
-		}
 		pagedir_clear_page(thread_victim->pagedir, pg_round_down(victim->addr) );
+
 		/* Remove from Frame Table */
 		if (frame_lookup(victim->kpage) == NULL) {
-			frame_dump();
-			printf("Pid: %d\n", process_current()->pid);
-			PANIC("victim %08x frame is not in frame table\n", victim->kpage);
+			PANIC("victim %p frame is not in frame table\n", victim->kpage);
 		}
 
-		struct list_elem *e;
-		void* backup=NULL;
-		for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
-		{
-		  struct frame_entry *fte = list_entry(e, struct frame_entry, elem);
-		  if (fte->faddr == victim->kpage){
-		  	list_remove(&fte->elem);
-		  	free(fte);
-//		  	printf("freed:%x\n",victim->kpage);
-		  	//char c = * (char *)victim->kpage;
-		  	//printf("%c",c);
-		  	lock_acquire(&palloc_lock);
-			palloc_free_page(victim->kpage);
-			backup = victim->kpage;
-		  	break;
-		  }
-		}
-		int i = palloc_lookup_index(backup);
+		struct frame_entry *fte = frame_lookup(victim->kpage);
+	  	list_remove(&fte->elem);
+	  	free(fte);
+
+	  	lock_acquire(&palloc_lock);
+		palloc_free_page(victim->kpage);
 		faddr = palloc_get_page(flag);
-//		printf("alloc:%x\n",faddr);
-		if (faddr == NULL){
-			printf("%d\n", palloc_lookup_index(backup));
-			printf("we freed %x\n", backup);
-			if (palloc_lookup_bit(backup)==true){
-				printf("WHY??\n");
-			}else{
-				printf("Get Page is odd\n");
-			}
-			page_dump();
-			//faddr = palloc_get_page2(flag,i);
-		}
-
-		lock_release(&palloc_lock);
 		ASSERT(faddr != NULL);
+		lock_release(&palloc_lock);
+
 		frame_insert(faddr);
 		lock_release(&frame_lock);
 
@@ -108,29 +75,18 @@ void *frame_alloc(enum palloc_flags flag) {
 
 void frame_free(void* faddr){
 	lock_acquire(&frame_lock);
-	struct list_elem *e;
-	bool flag = false;
-	struct frame_entry *fte;
-	for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
-	{
-	  fte = list_entry(e, struct frame_entry, elem);
-	  if (fte->faddr == faddr){
-	  	break;
-	  	//list_remove(&fte->elem);
-	  	//free(fte);
-		//palloc_free_page(faddr);
-	  	//break;
-	  }
-	}
-	  	list_remove(&fte->elem);
-	  	free(fte);
-	  	lock_acquire(&palloc_lock);
-		palloc_free_page(faddr);
-		lock_release(&palloc_lock);
+	struct frame_entry *fte = frame_lookup(faddr);
+	ASSERT(fte);
 
-	  	
+  	list_remove(&fte->elem);
+  	free(fte);
+  	lock_acquire(&palloc_lock);
+	palloc_free_page(faddr);
+	lock_release(&palloc_lock);
+
 	lock_release(&frame_lock);
 }
+
 
 void frame_dump(void){
 
@@ -146,18 +102,6 @@ void frame_dump(void){
 }
 
 struct frame_entry* frame_lookup(void* faddr){
-	struct list_elem *e;
-	for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
-	{
-	  struct frame_entry *fte = list_entry(e, struct frame_entry, elem);
-	  if (fte->faddr == faddr)
-	  	return fte;
-	  
-	}
-	return NULL;
-}
-
-struct frame_entry* frame_lookup2(void* faddr){
 	struct list_elem *e;
 	for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
 	{

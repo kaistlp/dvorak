@@ -42,7 +42,7 @@ process_execute (const char *cmd_line)
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
-    if (fn_copy == NULL) {
+  if (fn_copy == NULL) {
     if (VERBOSE) printf("fn_copy ALLOCATION FAIL\n");
     return TID_ERROR;
   }
@@ -240,13 +240,12 @@ process_exit (void)
       list_remove(&pcb->elem);
       free(pcb);
     }
+
+    suplpage_process_exit();
   }
 
-  suplpage_process_exit();
   //frame_dump();
   
-  // TO DO 여기에서 supple로 보고 frame_free외치기
-
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
 

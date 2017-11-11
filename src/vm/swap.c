@@ -5,12 +5,14 @@
 #include "threads/vaddr.h"
 #include "swap.h"
 #include "threads/malloc.h"
+#include "threads/synch.h"
 #include <stdio.h>
 
 struct hash swaps;
 struct disk *swap_disk;
 struct bitmap *swap_disk_map;
 struct swap * swap_lookup (const void *address);
+struct lock swap_lock;
 
 
 unsigned swap_hash (const struct hash_elem *s_, void *aux UNUSED) {
@@ -29,6 +31,7 @@ void swap_init(void) {
 	swap_disk = disk_get(1, 1);
 	swap_disk_map = bitmap_create(disk_size(swap_disk) / 8);
 	printf("Swap disk: %d sector available\n", disk_size(swap_disk) / 8);
+	lock_init(&swap_lock);
 }
 
 struct swap * swap_lookup (const void *address) {
@@ -42,8 +45,10 @@ struct swap * swap_lookup (const void *address) {
 /* Memory -> Disk */
 bool swap_insert (const void *paddr, void *buf) {
 	// printf("paddr:%08x swap in\n", paddr);
+	lock_acquire(&swap_lock);
 	struct swap *s = calloc (1, sizeof (struct swap));
 	if (s == NULL) {
+		lock_release(&swap_lock);
 		return false;
 	}
 
@@ -51,6 +56,7 @@ bool swap_insert (const void *paddr, void *buf) {
 	size_t idx = bitmap_scan_and_flip(swap_disk_map, 0, 1, 0);
 	if (idx == BITMAP_ERROR){
 		free(s);
+		lock_release(&swap_lock);
 		return false;	// swap disk is full
 	}
 	s->disk_sec = idx;
@@ -62,36 +68,44 @@ bool swap_insert (const void *paddr, void *buf) {
 	{
 		disk_write(disk_get(1, 1), (disk_sector_t) 8*idx + i, (const void *) ((uintptr_t) buf + i * 512));
 	}
+	lock_release(&swap_lock);
 	return true;
 }
 
 /* Disk -> Memory */
 bool swap_out (void* paddr, void* kpage_dest) {
-	// printf("paddr:%08x swap out to %08x\n", paddr, kpage_dest);
+	lock_acquire(&swap_lock);
 	struct swap *s = swap_lookup(paddr);
-	if (!s)
+	if (!s) {
+		lock_release(&swap_lock);
 		return false;
+	}
 	size_t idx = s->disk_sec;
 	ASSERT(bitmap_test(swap_disk_map, idx) == true);
 
 	int i;
 	for (i = 0; i < 8; ++i)
 	{
-		disk_read(disk_get(1, 1), (disk_sector_t) 8*idx + i, (const void *) ((uintptr_t) kpage_dest + i * 512));
+		disk_read(disk_get(1, 1), (disk_sector_t) 8*idx + i, (void *) ((uintptr_t) kpage_dest + i * 512));
 	}
 	bitmap_flip(swap_disk_map, idx);
 	hash_delete(&swaps, &s->hash_elem);
+	lock_release(&swap_lock);
 	return true;
 }
 
 void swap_clear (void* supladdr) {
+	lock_acquire(&swap_lock);
 	struct swap *s = swap_lookup(supladdr);
-	if (!s)
+	if (!s) {
+		lock_release(&swap_lock);
 		return;
+	}
 	size_t idx = s->disk_sec;
 	bitmap_set(swap_disk_map, idx, false);
 	hash_delete(&swaps, &s->hash_elem);
 	free(s);
+	lock_release(&swap_lock);
 }
 
 void swap_dump (void) {

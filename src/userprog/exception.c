@@ -93,8 +93,8 @@ kill (struct intr_frame *f)
     case SEL_UCSEG:
       /* User's code segment, so it's a user exception, as we
          expected.  Kill the user process.  */
-      printf ("%s: dying due to interrupt %#04x (%s).\n",
-              thread_name (), f->vec_no, intr_name (f->vec_no));
+      printf ("%s (pid: %d): dying due to interrupt %#04x (%s).\n",
+              thread_name (), thread_current()->pid, f->vec_no, intr_name (f->vec_no));
       intr_dump_frame (f);
 
       thread_exit (); 
@@ -147,15 +147,19 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
- // page_dump();
+  // printf ("Page fault at %p: %s error %s page in %s context. (pid: %d)\n",
+  //         fault_addr,
+  //         not_present ? "not present" : "rights violation",
+  //         write ? "writing" : "reading",
+  //         user ? "user" : "kernel",
+  //         process_current()->pid);
+  
+  /* Turn interrupts back on (they were only off so that we could
+     be assured of reading CR2 before it changed). */
+  intr_enable ();
 
   if (!not_present) {
     page_fault_cnt++;
-    // printf ("Page fault at %p: %s error %s page in %s context.\n",
-    //         fault_addr,
-    //         not_present ? "not present" : "rights violation",
-    //         write ? "writing" : "reading",
-    //         user ? "user" : "kernel");
     if (user)
       kill (f);
     else
@@ -165,37 +169,37 @@ page_fault (struct intr_frame *f)
   uintptr_t supladdr = (uintptr_t) pg_round_down(fault_addr) | process_current()->pid;
 
   struct page *pg = suplpage_lookup((void *)supladdr);
-  
-  /* Turn interrupts back on (they were only off so that we could
-     be assured of reading CR2 before it changed). */
-  intr_enable ();
+
   if (pg == NULL) { // New Page
     if (is_kernel_vaddr(fault_addr) || f->esp > fault_addr + 32) {
       page_fault_cnt++;
-      //page_dump();
+      
       if (user)
         kill (f);
       else
         thread_exit();
       
     } else {
+      /* Stack Growth */
       void* kpage = frame_alloc (PAL_USER | PAL_ZERO);
       if (kpage != NULL) 
       {
         struct thread *t = thread_current();
         bool success = suplpage_set_page(t->pagedir, process_current()->next_stptr, kpage, true);
+        if (!success)
+          PANIC ("Stack growth failed\n");
+        
         process_current()->next_stptr -= PGSIZE;
       } else {
-        printf ("Stack growth failed\n");
-
+        PANIC ("Stack growth failed\n");
       } 
     }
   } else {
     process_current()->esp = f->esp;
     if (suplpage_get_page(thread_current()->pagedir, pg_round_down(fault_addr)) == NULL) {
-
       kill (f);
     } else {
+      // printf("Faulted page handled [%p] -> %p\n", pg->addr, pg->kpage);
       process_current()->esp = NULL;
       return;
     }

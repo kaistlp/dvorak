@@ -60,6 +60,6 @@ struct process *lookup_process_by_pid (pid_t pid);
 
 void remove_child_list (struct process*);
 
-#define VERBOSE 1
+#define VERBOSE 0
 
 #endif /* userprog/process.h */
