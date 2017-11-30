@@ -146,6 +146,18 @@ bool suplpage_set_page(uint32_t *pd, void* upage, void *kpage, bool rw) {
 	return success;
 }
 
+void suplpage_insert (void* upage, enum page_location loc) {
+	lock_acquire(&page_lock);
+	struct page *p = malloc (sizeof (struct page));
+	p->pid = process_current()->pid;
+	p->addr = (void *) supladdr(upage, p->pid);
+	p->location = loc;
+	p->updated_time = time;
+	time++;
+	hash_insert(&pages, &p->hash_elem);
+	lock_release(&page_lock);
+}
+
 void suplpage_clear_page(uint32_t *pd, void *upage) {
 	void* suplpage = (void *) supladdr(upage, process_current()->pid);
 	lock_acquire(&page_lock);
@@ -183,6 +195,27 @@ struct page* suplpage_get_victim (void) {
 	}
 	return page_victim;
 	
+}
+
+bool suplpage_scan_consecutive (void* vaddr_start, void* vaddr_end) {
+	if (hash_empty(&pages))
+		return false;
+
+	ASSERT(vaddr_start == pg_round_down(vaddr_start));
+	struct process* cur_p = process_current();
+	struct hash_iterator i;
+	hash_first(&i, &pages);
+	while (hash_next(&i)) {
+		struct page *p = hash_entry(hash_cur(&i), struct page, hash_elem);
+		if (p->pid != cur_p->pid) 
+			continue; // ignore other process's pages
+
+		if ((uintptr_t) pg_round_down(p->addr) >= (uintptr_t) vaddr_start 
+			&& (uintptr_t) pg_round_down(p->addr) < (uintptr_t) vaddr_end)
+			return false;
+	}
+	return true;
+
 }
 
 uintptr_t supladdr(void* upage, int pid) {

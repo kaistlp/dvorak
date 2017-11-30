@@ -3,6 +3,7 @@
 
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "userprog/process.h"
 
 void syscall_init (void);
 void syscall_exit(struct intr_frame *f, int status);
@@ -17,6 +18,8 @@ void syscall_write(struct intr_frame *f, int fd, void* buffer, unsigned size);
 void syscall_close (struct intr_frame *f UNUSED, int fd);
 void syscall_seek(struct intr_frame *f UNUSED, int fd, unsigned position);
 void syscall_tell(struct intr_frame *f, int fd);
+void syscall_mmap(struct intr_frame *f, int fd, void* addr);
+void syscall_munmap(struct intr_frame *f, int mapping);
 
 bool validate_memory (void* ptr);
 

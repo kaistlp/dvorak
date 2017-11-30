@@ -91,12 +91,15 @@ void frame_free(void* faddr){
 void frame_dump(void){
 
 	printf("<Frame List>\n");
+	int count = 0;
 	struct list_elem *e;
 	for (e = list_begin (&frame_list); e != list_end (&frame_list); e = list_next (e))
 	{
 	  struct frame_entry *f = list_entry(e, struct frame_entry, elem);
+	  count++;
 	  printf("[0x%x]: pid %d\n", (uintptr_t) f->faddr, f->pcb->pid);
 	}
+	printf("%d Entries\n", count);
 	printf("\n");
 
 }

@@ -25,13 +25,15 @@ struct process
 	int load;							/* indicate process loading state */
 	int exit_status;					/* contains process exit status */
 	int fd_num;							/* For file descriptor allocation */
+	int mapid_num;						/* For mmap descriptor allocation */
 
 	struct process *parent;				/* Pcb for parent process */	
 	struct list child_list;				/* Child list of current process */
     struct list_elem elem;              /* List element for process_list */
     struct list_elem elem_heir; 		/* List element for child_list */
 
-    struct list fd_list;				/* List of file desciptor (file_noe) */
+    struct list fd_list;				/* List of file desciptor (file_node) */
+	struct list mmap_list;				/* List of file desciptor (mmap_node) */
 
     void* next_stptr;					/* pointr of next stack */
     void* esp;
@@ -45,10 +47,20 @@ struct file_node {
 	struct list_elem elem; 	// List element
 };
 
+/* Mmap node for file descriptor list */
+struct mmap_node {
+	int mapid; 				// mapid
+	struct file* file;		// corresponding file
+	void* addr;				// virtual address for mmap
+	void* size;
+	struct list_elem elem; 	// List element
+};
+
 void init_pcb(struct process *pcb, const char* name);
 void process_init(void);
 struct process* process_current(void);
 struct file_node* get_file_of_process(int fd);
+struct mmap_node* get_mmap_of_process(int mmapid);
 
 void print_all(void);
 void print_process(struct process *p);
@@ -59,6 +71,8 @@ struct process *get_child_process_by_tid (tid_t tid);
 struct process *lookup_process_by_pid (pid_t pid);
 
 void remove_child_list (struct process*);
+
+void process_unmap (struct mmap_node* mm);
 
 #define VERBOSE 0
 

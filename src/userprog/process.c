@@ -8,6 +8,7 @@
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
+#include "userprog/syscall.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -27,7 +28,7 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 static pid_t allocate_pid (void);
 static struct list process_list; // Process list of running
 static bool install_page (void *upage, void *kpage, bool writable);
-static struct lock process_lock;
+static struct lock file_lock;
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -215,6 +216,29 @@ void remove_child_list(struct process *p){
   }
 }
 
+void process_unmap (struct mmap_node* mm) {
+  int remainSize = mm->size;
+  int index = 0;
+  file_seek(mm->file, 0);
+
+  while (remainSize > 0) {
+    void *kpage = suplpage_get_page(thread_current()->pagedir, mm->addr + index);
+    ASSERT(kpage != NULL);
+    if (pagedir_is_dirty(thread_current()->pagedir, mm->addr + index)) {
+      lock_acquire(&file_lock);
+      file_write_at(mm->file, kpage, MIN(remainSize, PGSIZE), index);
+      lock_release(&file_lock);
+    }
+
+    suplpage_clear_page(thread_current()->pagedir, mm->addr + index);
+    remainSize -= PGSIZE;
+    index += PGSIZE;
+  }
+
+  file_seek(mm->file, 0);
+  free(mm);
+}
+
 /* Free the current process's resources. */
 void
 process_exit (void)
@@ -227,13 +251,22 @@ process_exit (void)
   if (pcb != NULL){
     pcb->exit_status = curr->exit_status;
     printf("%s: exit(%d)\n", pcb->name, curr->exit_status);
+    // free mmap
+    while (!list_empty(&pcb->mmap_list)){
+      struct mmap_node* mm = list_entry(list_pop_back(&pcb->mmap_list), struct mmap_node, elem); 
+      // printf("free %d\n", mm->mapid);
+      process_unmap(mm);
+    }
 
     // free file descriptors
+    // lock_acquire(&file_lock);
     while (!list_empty(&pcb->fd_list)){
       struct file_node* fn = list_entry(list_pop_back(&pcb->fd_list), struct file_node, elem); 
       file_close(fn->file);
       free(fn);
     }
+    // lock_release(&file_lock);
+
 
     if (pcb->parent == NULL) { 
       // no parent waiting this process, so free resources
@@ -304,6 +337,10 @@ void init_pcb(struct process *pcb, const char* name){
   list_init(&pcb->fd_list);
   pcb->fd_num = 2;
 
+  // file descriptor structure
+  list_init(&pcb->mmap_list);
+  pcb->mapid_num = 0;
+
   free(ptr);
 }
 
@@ -324,7 +361,7 @@ struct process* process_current(void){
 
 void process_init(void) {
   list_init(&process_list);
-  lock_init(&process_lock);
+  lock_init(&file_lock);
 
   struct process *root_pcb = malloc(sizeof(struct process));
   root_pcb->pid = 0; // root
@@ -332,6 +369,7 @@ void process_init(void) {
   list_push_back(&process_list, &root_pcb->elem);
 
   list_init(&root_pcb->fd_list);
+  list_init(&root_pcb->mmap_list);
   root_pcb->fd_num = 2;
   root_pcb->load = LOAD_SUCESS;
   root_pcb->tid = thread_current()->tid;
@@ -402,6 +440,18 @@ struct file_node* get_file_of_process(int fd) {
     struct file_node *f = list_entry(e, struct file_node, elem);
     if (f->fd == fd)
       return f;
+  }
+  return NULL;
+}
+
+struct mmap_node* get_mmap_of_process(int mmapid_) {
+  struct process* cur_pcb = process_current();
+  struct list_elem *e;
+  for (e = list_begin (&cur_pcb->mmap_list); e != list_end (&cur_pcb->mmap_list); e = list_next (e))
+  {
+    struct mmap_node *mm = list_entry(e, struct mmap_node, elem);
+    if (mm->mapid == mmapid_)
+      return mm;
   }
   return NULL;
 }
@@ -534,6 +584,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
+  lock_acquire(&file_lock);
   file = filesys_open (file_name);
   if (file == NULL) 
     { 
@@ -631,6 +682,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
  done:
   /* We arrive here whether the load is successful or not. */
   file_close (file);
+  lock_release(&file_lock);
   return success;
 }
 
@@ -718,7 +770,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       uint8_t *kpage = frame_alloc (PAL_USER);
       if (kpage == NULL) {
         if (VERBOSE) printf("frame allocation error\n");
-        disk_print_stats();
         return false;
       }
 

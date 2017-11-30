@@ -14,16 +14,20 @@
 #include "devices/input.h"
 #include "userprog/pagedir.h"
 #include "threads/init.h"
+#include "vm/page.h"
+#include "vm/frame.h"
 
 static void syscall_handler (struct intr_frame *);
 
 struct lock file_lock;
+struct lock mmap_lock;
 
 void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
   lock_init(&file_lock);
+  lock_init(&mmap_lock);
 }
 
 void
@@ -79,7 +83,10 @@ void syscall_open (struct intr_frame *f, const char* file_name) {
 	}
 
 	struct process *pcb = process_current();
+	lock_acquire(&file_lock);
 	struct file *fs = filesys_open(file_name);
+	lock_release(&file_lock);
+
 
 	// file is invaild
 	if(fs == NULL) {
@@ -93,7 +100,7 @@ void syscall_open (struct intr_frame *f, const char* file_name) {
 		file_deny_write(fs);
 	}
 
-	fn->fd = pcb->fd_num++;
+	fn->fd = pcb->fd_num++;	// file descriptor allocation
 	fn->file = fs;
 	list_push_back(&pcb->fd_list, &fn->elem);
 
@@ -148,12 +155,12 @@ void syscall_write(struct intr_frame *f, int fd, void* buffer, unsigned size) {
 }
 
 void syscall_close (struct intr_frame *f UNUSED, int fd) {
-	//printf("%d\n", process_current()->pid);
-	//print_process();
 	struct file_node *fn = get_file_of_process(fd);
 	if (fn != NULL) {
 		list_remove (&fn->elem);
+		lock_acquire(&file_lock);
 		file_close(fn->file);
+		lock_release(&file_lock);
 		free(fn);
 	}
 }
@@ -173,6 +180,96 @@ void syscall_tell(struct intr_frame *f, int fd) {
 	f->eax = file_tell(fn->file);
 }
 
+void syscall_mmap(struct intr_frame *f, int fd, void* addr) {
+	// printf("Addr: %p\n", addr);
+	struct file_node *fn = get_file_of_process(fd);
+	if (fn == NULL) { // invaild file descriptor
+		f->eax = -1;
+		return;
+	}
+
+	if (addr == NULL) {
+		f->eax = -1;
+		return;	
+	}
+
+	int filesize = file_length(fn->file);
+
+	if (filesize == 0) { // file is 0 byte
+		f->eax = -1;
+		return;
+	}
+
+	if (addr != pg_round_down(addr)) { // addr is not page-aligned
+		f->eax = -1;
+		return;
+	}
+	if (!suplpage_scan_consecutive(addr, addr + filesize)) {
+		f->eax = -1;
+		return;
+	}
+
+	lock_acquire(&mmap_lock);
+	int remainSize = filesize;
+	int index = 0;
+	while (remainSize > 0) {
+ 		void* kpage = frame_alloc(PAL_USER | PAL_ZERO);
+ 		int readSize = MIN(PGSIZE, remainSize);
+ 		lock_acquire(&file_lock);
+ 		file_read(fn->file, kpage, readSize);
+ 		lock_release(&file_lock);
+ 		suplpage_set_page(thread_current()->pagedir, addr + index, 
+ 			kpage, true);
+ 		pagedir_set_dirty(thread_current()->pagedir, addr + index, false);
+ 		remainSize -= readSize;
+ 		index += readSize;
+ 		// hex_dump(kpage, kpage, PGSIZE, true);
+	}
+	file_seek(fn->file, 0);
+
+
+	struct mmap_node *mm = malloc(sizeof(struct mmap_node));
+	mm->mapid = process_current()->mapid_num++; // mapid allocation
+	mm->addr = addr;
+	mm->size = filesize;
+	mm->file = fn->file;
+
+	list_push_back(&process_current()->mmap_list, &mm->elem);
+	f->eax = mm->mapid;
+	lock_release(&mmap_lock);
+}
+
+void syscall_munmap(struct intr_frame *f UNUSED, int mapid) {
+	struct mmap_node *mm = get_mmap_of_process(mapid);
+	if (mm == NULL) { // invaild file descriptor
+		return;
+	}
+	lock_acquire(&mmap_lock);
+	int remainSize = mm->size;
+	int index = 0;
+	file_seek(mm->file, 0);
+
+	while (remainSize > 0) {
+		void *kpage = suplpage_get_page(thread_current()->pagedir, mm->addr + index);
+		ASSERT(kpage != NULL);
+		if (pagedir_is_dirty(thread_current()->pagedir, mm->addr + index)) {
+			lock_acquire(&file_lock);
+			file_write_at(mm->file, kpage, MIN(remainSize, PGSIZE), index);
+			lock_release(&file_lock);
+		}
+
+		suplpage_clear_page(thread_current()->pagedir, mm->addr + index);
+		remainSize -= PGSIZE;
+		index += PGSIZE;
+	}
+	// printf("UNMAP\n");
+
+	file_seek(mm->file, 0);
+	list_remove(&mm->elem);
+	free(mm);
+	lock_release(&mmap_lock);
+}
+
 bool validate_memory (void* ptr) {
 	if (is_kernel_vaddr(ptr)) {
 		// Page Fault!
@@ -189,6 +286,7 @@ static void
 syscall_handler (struct intr_frame *f) 
 {	
 	int *st = (int *)f->esp;
+	// printf("Syscall %d called!\n", *st);
 	if (!validate_memory(st)){
 		thread_exit();
 	}
@@ -199,6 +297,7 @@ syscall_handler (struct intr_frame *f)
 			argc++;
 		case SYS_CREATE:
 		case SYS_SEEK:
+		case SYS_MMAP :
 			argc++;
 		case SYS_EXIT:
 		case SYS_EXEC:
@@ -208,6 +307,7 @@ syscall_handler (struct intr_frame *f)
 		case SYS_FILESIZE:
 		case SYS_TELL:
 		case SYS_CLOSE:
+		case SYS_MUNMAP :
 			argc++;
 	}
 	if (!validate_memory(st+argc)) {
@@ -276,6 +376,11 @@ syscall_handler (struct intr_frame *f)
 		case SYS_TELL :
 			syscall_tell(f, (int)*(st+1));
 			break;
-
+		case SYS_MMAP :
+			syscall_mmap(f, (int)*(st+1), (void *)(*(st+2)));
+			break;
+		case SYS_MUNMAP :
+			syscall_munmap(f, (int)*(st+1));
+			break;
 	}
 }

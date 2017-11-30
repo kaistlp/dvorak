@@ -7,6 +7,8 @@
 enum page_location {
 	MEMORY,
 	DISK,
+	MMAP,
+	LOAD,
 	INVAILD
 };
 
@@ -14,6 +16,9 @@ struct page {
 	enum page_location location;
 	int pid;
 	int updated_time;
+	
+	struct file *file;
+	int ofs;
 
 	void *addr;
 	void *kpage;
@@ -28,10 +33,13 @@ bool suplpage_set_page(uint32_t *pd, void* upage, void *kpage, bool rw);
 void* suplpage_get_page(uint32_t *pd, void* upage);
 void suplpage_clear_page(uint32_t *pd, void *upage);
 
+void suplpage_insert (void* upage, enum page_location loc);
+
 struct page* suplpage_get_victim (void);
 
 struct page * suplpage_lookup (void *supladdr);
 void suplpage_process_exit (void);
+bool suplpage_scan_consecutive (void* supl_start, void* supl_end);
 
 uintptr_t supladdr(void* upage, int pid);
 void page_print(struct page* p);
