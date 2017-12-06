@@ -267,6 +267,7 @@ process_exit (void)
     }
     // lock_release(&file_lock);
 
+    suplpage_process_exit();
 
     if (pcb->parent == NULL) { 
       // no parent waiting this process, so free resources
@@ -274,7 +275,6 @@ process_exit (void)
       free(pcb);
     }
 
-    suplpage_process_exit();
   }
 
   //frame_dump();
