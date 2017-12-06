@@ -53,14 +53,17 @@ struct bc_entry* bc_put (disk_sector_t sector_idx) {
 	if (bc_size < MAX_BUFFER_CACHE_SIZE) {
 		struct bc_entry *bce = malloc(sizeof(struct bc_entry));
 		if (bce == NULL) {
+			lock_release(&bc_lock);
+			PANIC("Kernel memory low");
 			return NULL;
 		}
 		bce->kaddr = malloc(DISK_SECTOR_SIZE);
 		if (bce->kaddr == NULL) {
 			free (bce);
+			lock_release(&bc_lock);
+			PANIC("Kernel memory low");
 			return NULL;
 		}
-		memset(bce->kaddr, 0, DISK_SECTOR_SIZE);
 		bce->read_count = 0;
 		bce->write_count = 0;
 		bce->access = true;
@@ -80,12 +83,35 @@ struct bc_entry* bc_put (disk_sector_t sector_idx) {
 		struct bc_entry *victim = bc_get_victim();
 		ASSERT(victim != NULL);
 		bc_write_back(victim);
+		hash_delete(&bc_hash, &victim->hash_elem);
+		free(victim->kaddr);
+		free(victim);
 
-		victim->read_count++;
-		disk_read(filesys_disk, sector_idx, victim->kaddr);
-		victim->read_count--;
+		struct bc_entry *bce = malloc(sizeof(struct bc_entry));
+		if (bce == NULL) {
+			lock_release(&bc_lock);
+			PANIC("Kernel memory low");
+			return NULL;
+		}
+		bce->kaddr = malloc(DISK_SECTOR_SIZE);
+		if (bce->kaddr == NULL) {
+			free (bce);
+			lock_release(&bc_lock);
+			PANIC("Kernel memory low");
+			return NULL;
+		}
+		bce->read_count = 0;
+		bce->write_count = 0;
+		bce->access = true;
 
-		victim->sector_idx = sector_idx;
+		bce->read_count++;
+		disk_read(filesys_disk, sector_idx, bce->kaddr);
+		bce->read_count--;
+
+		bce->sector_idx = sector_idx;
+		hash_insert(&bc_hash, &bce->hash_elem);
+		bc_size++;
+
 		lock_release(&bc_lock);
 		return victim;
 	}
@@ -98,8 +124,10 @@ void bc_write_back_elem (struct hash_elem* e, void* aux UNUSED) {
 }
 
 void bc_close (void) {
+	lock_acquire(&bc_lock);
 	hash_apply(&bc_hash, bc_write_back_elem);
 	hash_destroy(&bc_hash, NULL);
+	lock_release(&bc_lock);
 }
 
 struct bc_entry* bc_get_victim (void) {
@@ -108,25 +136,27 @@ struct bc_entry* bc_get_victim (void) {
 
 	struct bc *bc_victim = NULL;
 	struct hash_iterator i;
-	hash_first(&i, &bc_hash);
 
-	while (true) {
-		struct bc_entry *bce = hash_entry(hash_cur(&i), struct bc_entry, hash_elem);
-		if (bce->read_count > 0 || bce->write_count > 0)
-			;
-		else {
-			if (bce->access) {
-				bce->access = false;
-			} else {
-				bc_victim = bce;
-				break;
+	bool loop = true;
+	while (loop) {
+		hash_first(&i, &bc_hash);
+		while (hash_next(&i)) {
+			struct bc_entry *bce = hash_entry(hash_cur(&i), struct bc_entry, hash_elem);
+			if (bce->read_count > 0 || bce->write_count > 0)
+				continue;
+			else {
+				if (bce->access) {
+					bce->access = false;
+				} else {
+					bc_victim = bce;
+					loop = false;
+					break;
+				}
 			}
 		}
-		if (hash_next(&i) == NULL) {
-			hash_first(&i, &bc_hash);
-			hash_next(&i);
-		}
 	}
+	ASSERT(bc_victim);
+	// bc_dump();
 	return bc_victim;
 }
 

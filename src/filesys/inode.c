@@ -227,7 +227,6 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       } else { // cache is not found
         struct bc_entry *bce = bc_put(sector_idx);
         if (bce == NULL) {
-          PANIC("NULL");
           break;
         }
         memcpy(buffer + bytes_read, (uint8_t *) bce->kaddr + sector_ofs, chunk_size);
@@ -300,7 +299,6 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       } else { // cache is not found
         struct bc_entry *bce = bc_put(sector_idx);
         if (bce == NULL) {
-          PANIC("NULL");
           break;
         }
         memcpy((uint8_t * )bce->kaddr + sector_ofs, buffer + bytes_written, chunk_size);

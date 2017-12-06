@@ -176,8 +176,10 @@ page_fault (struct intr_frame *f)
       
       if (user)
         kill (f);
-      else
+      else {
+        // debug_backtrace();
         thread_exit();
+      }
       
     } else {
       /* Stack Growth */

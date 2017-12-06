@@ -2,6 +2,7 @@
 #include <debug.h>
 #include <stdio.h>
 #include <string.h>
+#include "threads/synch.h"
 #include "filesys/file.h"
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
@@ -26,6 +27,7 @@ filesys_init (bool format)
   inode_init ();
   free_map_init ();
   bc_init();
+  lock_init(&file_internal_lock);
 
   if (format) 
     do_format ();
@@ -72,7 +74,6 @@ filesys_open (const char *name)
 {
   struct dir *dir = dir_open_root ();
   struct inode *inode = NULL;
-
   if (dir != NULL)
     dir_lookup (dir, name, &inode);
   dir_close (dir);

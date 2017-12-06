@@ -1,4 +1,5 @@
 #include "filesys/file.h"
+#include "threads/synch.h"
 #include <debug.h>
 #include "filesys/inode.h"
 #include "threads/malloc.h"
@@ -16,19 +17,22 @@ struct file
    allocation fails or if INODE is null. */
 struct file *
 file_open (struct inode *inode) 
-{
+{  
+  lock_acquire(&file_internal_lock);
   struct file *file = calloc (1, sizeof *file);
   if (inode != NULL && file != NULL)
     {
       file->inode = inode;
       file->pos = 0;
       file->deny_write = false;
+      lock_release(&file_internal_lock);
       return file;
     }
   else
     {
       inode_close (inode);
       free (file);
+      lock_release(&file_internal_lock);
       return NULL; 
     }
 }
@@ -45,12 +49,14 @@ file_reopen (struct file *file)
 void
 file_close (struct file *file) 
 {
+  lock_acquire(&file_internal_lock);
   if (file != NULL)
     {
       file_allow_write (file);
       inode_close (file->inode);
       free (file); 
     }
+  lock_release(&file_internal_lock);
 }
 
 /* Returns the inode encapsulated by FILE. */

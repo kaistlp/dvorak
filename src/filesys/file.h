@@ -1,8 +1,10 @@
 #ifndef FILESYS_FILE_H
 #define FILESYS_FILE_H
 
+#include "threads/synch.h"
 #include "filesys/off_t.h"
 
+struct lock file_internal_lock;
 struct inode;
 
 /* Opening and closing files. */

@@ -29,6 +29,7 @@ static pid_t allocate_pid (void);
 static struct list process_list; // Process list of running
 static bool install_page (void *upage, void *kpage, bool writable);
 static struct lock file_lock;
+struct lock process_lock;
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -196,11 +197,14 @@ process_wait (tid_t child_tid)
     return -1;
   // Remove child_process on list
   ASSERT(&child_process->elem);
-  list_remove(&child_process->elem); // from process_list
 
+  lock_acquire(&process_lock);
+  list_remove(&child_process->elem); // from process_list
   remove_child_list(child_process);
+
   int exit_status = child_process->exit_status;
   free (child_process);
+  lock_release(&process_lock);
 
   return exit_status;
 
@@ -350,18 +354,23 @@ struct process* process_current(void){
     return NULL;
   }
 
+  lock_acquire(&process_lock);
   for (e = list_begin (&process_list); e != list_end (&process_list); e = list_next (e))
   {
     struct process *pcb = list_entry(e, struct process, elem);
-    if (pcb->tid == thread_current()->tid)
+    if (pcb->tid == thread_current()->tid) {
+      lock_release(&process_lock);
       return pcb;
+    }
   }
+  lock_release(&process_lock);
   return NULL;
 }
 
 void process_init(void) {
   list_init(&process_list);
   lock_init(&file_lock);
+  lock_init(&process_lock);
 
   struct process *root_pcb = malloc(sizeof(struct process));
   root_pcb->pid = 0; // root
