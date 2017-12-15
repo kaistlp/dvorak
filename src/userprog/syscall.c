@@ -16,6 +16,9 @@
 #include "threads/init.h"
 #include "vm/page.h"
 #include "vm/frame.h"
+#include "filesys/directory.h"
+#include "filesys/inode.h"
+#include "filesys/free-map.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -25,9 +28,9 @@ struct lock mmap_lock;
 void
 syscall_init (void) 
 {
-  intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-  lock_init(&file_lock);
-  lock_init(&mmap_lock);
+	intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+	lock_init(&file_lock);
+	lock_init(&mmap_lock);
 }
 
 void
@@ -68,11 +71,11 @@ void syscall_wait (struct intr_frame *f, pid_t pid) {
 }
 
 void syscall_create (struct intr_frame *f, const char* file, unsigned initial_size) {
-	f->eax = filesys_create(file, initial_size);
+	f->eax = filesys_create(file, initial_size, process_current()->cur_dir);
 }
 
 void syscall_remove(struct intr_frame *f, const char* file) {
-	f->eax = filesys_remove(file);	
+	f->eax = filesys_remove(file, process_current()->cur_dir);	
 }
 
 void syscall_open (struct intr_frame *f, const char* file_name) {
@@ -81,35 +84,67 @@ void syscall_open (struct intr_frame *f, const char* file_name) {
 		f->eax = -1;
 		return;
 	}
-
 	struct process *pcb = process_current();
-	lock_acquire(&file_lock);
-	struct file *fs = filesys_open(file_name);
-	lock_release(&file_lock);
 
-
-	// file is invaild
-	if(fs == NULL) {
-		f->eax = -1;
-		free(fn);
+	// root directory case 
+	if (!strcmp(file_name, "/")) {
+		fn->dir = dir_open_root();
+		fn->isdir = true;
+		list_push_back(&pcb->fd_list, &fn->elem);
+		fn->fd = pcb->fd_num++;	// file descriptor allocation
+		f->eax = fn->fd;
 		return;
 	}
 
-	// if file_name is already running, deny writing.
-	if (is_running(file_name)){
-		file_deny_write(fs);
+	struct inode *inode = NULL;
+	lock_acquire(&file_lock);
+	struct file *fs = filesys_open(file_name, process_current()->cur_dir);
+	lock_release(&file_lock);
+	
+	if (fs == NULL) {
+		free(fn);
+		f->eax = -1;
+		return;
 	}
 
-	fn->fd = pcb->fd_num++;	// file descriptor allocation
-	fn->file = fs;
-	list_push_back(&pcb->fd_list, &fn->elem);
+	inode = file_get_inode(fs);
+	if (inode_isdir(inode)) {
+		/* directory */
+		struct dir* dir = dir_open(inode);
+		if (dir == NULL) {
+			f->eax = -1;
+			free(fn);
+			return;
+		}
 
+		fn->dir = dir;
+		fn->isdir = true;
+	} else {
+		/* file */
+
+		// file is invaild
+		if(fs == NULL) {
+			f->eax = -1;
+			free(fn);
+			return;
+		}
+
+		// if file_name is already running, deny writing.
+		if (is_running(file_name)){
+			file_deny_write(fs);
+		}
+
+		fn->file = fs;
+		fn->isdir = false;
+	}
+	list_push_back(&pcb->fd_list, &fn->elem);
+	fn->fd = pcb->fd_num++;	// file descriptor allocation
 	f->eax = fn->fd;
 }
 
 void syscall_filesize (struct intr_frame *f, int fd) {
 	struct file_node *fn = get_file_of_process(fd);
-	if (fn == NULL) { // invaild file descriptor
+	if (fn == NULL || fn->isdir) { // invaild file descriptor
 		f->eax = -1;
 		return;
 	}
@@ -119,15 +154,17 @@ void syscall_filesize (struct intr_frame *f, int fd) {
 void syscall_read (struct intr_frame *f, int fd, void* buffer, unsigned size){
 	unsigned i;
 	if (fd == STDIN_FILENO) {
-		for (i = 0; i < size; ++i)
+		unsigned i;
+		uint8_t* local_buffer = (uint8_t *) buffer;
+		for (i = 0; i < size; i++)
 		{
-			*(uint8_t *)(buffer + i) = input_getc();
+			local_buffer[i] = input_getc();
 		}
-		f->eax = 1;
+		f->eax = size;
 		return;
 	} else {
 		struct file_node *fn = get_file_of_process(fd);
-		if (fn == NULL) { // invaild file descriptor
+		if (fn == NULL || fn->isdir) { // invaild file descriptor
 			f->eax = -1;
 			return;
 		}
@@ -148,6 +185,11 @@ void syscall_write(struct intr_frame *f, int fd, void* buffer, unsigned size) {
 			f->eax = 0;
 			return;
 		}
+
+		if (fn->isdir) {
+			f->eax = -1;
+			return;	
+		}
 		lock_acquire(&file_lock);
 		f->eax = file_write(fn->file, buffer, size);
 		lock_release(&file_lock);
@@ -156,13 +198,19 @@ void syscall_write(struct intr_frame *f, int fd, void* buffer, unsigned size) {
 
 void syscall_close (struct intr_frame *f UNUSED, int fd) {
 	struct file_node *fn = get_file_of_process(fd);
-	if (fn != NULL) {
-		list_remove (&fn->elem);
-		lock_acquire(&file_lock);
-		file_close(fn->file);
-		lock_release(&file_lock);
-		free(fn);
+	if (fn == NULL) {
+		return;
 	}
+
+	list_remove (&fn->elem);
+	lock_acquire(&file_lock);
+	if (fn->isdir) {
+		dir_close(fn->dir);
+	} else {
+		file_close(fn->file);
+	}
+	lock_release(&file_lock);
+	free(fn);
 }
 
 void syscall_seek(struct intr_frame *f UNUSED, int fd, unsigned position) {
@@ -213,16 +261,16 @@ void syscall_mmap(struct intr_frame *f, int fd, void* addr) {
 	int remainSize = filesize;
 	int index = 0;
 	while (remainSize > 0) {
- 		void* kpage = frame_alloc(PAL_USER | PAL_ZERO);
- 		int readSize = MIN(PGSIZE, remainSize);
- 		lock_acquire(&file_lock);
- 		file_read(fn->file, kpage, readSize);
- 		lock_release(&file_lock);
- 		suplpage_set_page(thread_current()->pagedir, addr + index, 
- 			kpage, true);
- 		pagedir_set_dirty(thread_current()->pagedir, addr + index, false);
- 		remainSize -= readSize;
- 		index += readSize;
+		void* kpage = frame_alloc(PAL_USER | PAL_ZERO);
+		int readSize = MIN(PGSIZE, remainSize);
+		lock_acquire(&file_lock);
+		file_read(fn->file, kpage, readSize);
+		lock_release(&file_lock);
+		suplpage_set_page(thread_current()->pagedir, addr + index, 
+			kpage, true);
+		pagedir_set_dirty(thread_current()->pagedir, addr + index, false);
+		remainSize -= readSize;
+		index += readSize;
  		// hex_dump(kpage, kpage, PGSIZE, true);
 	}
 	file_seek(fn->file, 0);
@@ -270,6 +318,57 @@ void syscall_munmap(struct intr_frame *f UNUSED, int mapid) {
 	lock_release(&mmap_lock);
 }
 
+void syscall_chdir(struct intr_frame *f, const char* name) {
+	f->eax = filesys_chdir(name, process_current()->cur_dir);
+}
+
+void syscall_mkdir(struct intr_frame *f, const char* name) {
+	bool abs;
+	struct inode* inode;
+	if (!strcmp(name, "")) {
+		f->eax = false;
+		return;
+	}
+
+	struct process* cur_pcb = process_current();
+	f->eax = filesys_mkdir(name, process_current()->cur_dir);
+}
+
+void syscall_readdir(struct intr_frame *f, int fd, char *name) {
+	struct file_node *fn = get_file_of_process(fd);
+	if (fn == NULL || !fn->isdir) {
+		f->eax = false;
+		return;
+	}
+
+	f->eax = dir_readdir(fn->dir, name);
+}
+
+
+void syscall_isdir(struct intr_frame *f, int fd) {
+	struct file_node *fn = get_file_of_process(fd);
+	if (fn != NULL) {
+		f->eax = fn->isdir;
+		return;
+	}
+	f->eax = false;
+}
+
+void syscall_inumber(struct intr_frame *f, int fd) {
+	struct file_node *fn = get_file_of_process(fd);
+	if (fn != NULL) {
+		if (fn->isdir) {
+			f->eax = inode_get_inumber(dir_get_inode(fn->dir));
+			return;
+		} else {
+			f->eax = inode_get_inumber(file_get_inode(fn->file));
+			return;
+		}
+	}
+	f->eax = -1;
+}
+
+
 bool validate_memory (void* ptr) {
 	if (is_kernel_vaddr(ptr)) {
 		// Page Fault!
@@ -294,11 +393,12 @@ syscall_handler (struct intr_frame *f)
 	switch (*st) {
 		case SYS_READ:
 		case SYS_WRITE:
-			argc++;
+		argc++;
 		case SYS_CREATE:
 		case SYS_SEEK:
 		case SYS_MMAP :
-			argc++;
+		case SYS_READDIR : 
+		argc++;
 		case SYS_EXIT:
 		case SYS_EXEC:
 		case SYS_WAIT:
@@ -307,8 +407,12 @@ syscall_handler (struct intr_frame *f)
 		case SYS_FILESIZE:
 		case SYS_TELL:
 		case SYS_CLOSE:
-		case SYS_MUNMAP :
-			argc++;
+		case SYS_MUNMAP:
+		case SYS_CHDIR:
+		case SYS_MKDIR:
+		case SYS_ISDIR: 
+		case SYS_INUMBER:
+		argc++;
 	}
 	if (!validate_memory(st+argc)) {
 		// Page Fault!
@@ -320,13 +424,14 @@ syscall_handler (struct intr_frame *f)
 	switch (*st) {
 		case SYS_READ :
 		case SYS_WRITE :
-			buf_index = 2;
-			break;
+		case SYS_READDIR :
+		buf_index = 2;
+		break;
 		case SYS_EXEC :
 		case SYS_CREATE :
 		case SYS_REMOVE :
 		case SYS_OPEN :
-			buf_index = 1;
+		buf_index = 1;
 	}
 	if (buf_index != 0) {
 		if (!validate_memory((void *)*(st+buf_index))){
@@ -334,53 +439,68 @@ syscall_handler (struct intr_frame *f)
 		}
 	}
 
-	 
+
 	
 	switch (*st) {
 		case SYS_HALT : 
-			power_off();
-			break;
+		power_off();
+		break;
 		case SYS_EXIT : 
-			syscall_exit(f, *(st+1));
-			break;
+		syscall_exit(f, *(st+1));
+		break;
 		case SYS_EXEC :
-			syscall_exec(f, (const char *)*(st+1));
-			break;
+		syscall_exec(f, (const char *)*(st+1));
+		break;
 		case SYS_WAIT :
-			syscall_wait(f, (pid_t)*(st+1));
-			break;
+		syscall_wait(f, (pid_t)*(st+1));
+		break;
 		case SYS_CREATE : 
-			syscall_create(f, (const char *)(*(st+1)), (unsigned)(*(st+2)));
-			break;
+		syscall_create(f, (const char *)(*(st+1)), (unsigned)(*(st+2)));
+		break;
 		case SYS_REMOVE : 
-			syscall_remove(f, (const char *)(*(st+1)));
-			break;
+		syscall_remove(f, (const char *)(*(st+1)));
+		break;
 		case SYS_OPEN : 
-			syscall_open(f, (const char *)(*(st+1)));
-			break;
+		syscall_open(f, (const char *)(*(st+1)));
+		break;
 		case SYS_FILESIZE :
-			syscall_filesize(f, (int)(*(st+1)));
-			break;
+		syscall_filesize(f, (int)(*(st+1)));
+		break;
 		case SYS_READ : 
-			syscall_read (f, (int)(*(st+1)), (void *)(*(st+2)), (unsigned)(*(st+3)));
-			break;
+		syscall_read (f, (int)(*(st+1)), (void *)(*(st+2)), (unsigned)(*(st+3)));
+		break;
 		case SYS_WRITE :
-			syscall_write(f, (int)*(st+1), (void *)(*(st+2)), (unsigned)(*(st+3)));
-			break;
+		syscall_write(f, (int)*(st+1), (void *)(*(st+2)), (unsigned)(*(st+3)));
+		break;
 		case SYS_CLOSE : 
-			syscall_close(f, (int)*(st+1));
-			break;
+		syscall_close(f, (int)*(st+1));
+		break;
 		case SYS_SEEK :
-			syscall_seek(f, (int)*(st+1), (unsigned)*(st+2));
-			break;
+		syscall_seek(f, (int)*(st+1), (unsigned)*(st+2));
+		break;
 		case SYS_TELL :
-			syscall_tell(f, (int)*(st+1));
-			break;
+		syscall_tell(f, (int)*(st+1));
+		break;
 		case SYS_MMAP :
-			syscall_mmap(f, (int)*(st+1), (void *)(*(st+2)));
-			break;
+		syscall_mmap(f, (int)*(st+1), (void *)(*(st+2)));
+		break;
 		case SYS_MUNMAP :
-			syscall_munmap(f, (int)*(st+1));
-			break;
+		syscall_munmap(f, (int)*(st+1));
+		break;
+		case SYS_CHDIR :
+		syscall_chdir(f, (const char*)*(st+1));
+		break;
+		case SYS_MKDIR :
+		syscall_mkdir(f, (const char* )*(st+1));
+		break;
+		case SYS_READDIR :
+		syscall_readdir(f, (int)*(st+1), (char *)*(st+2));
+		break;
+		case SYS_ISDIR :
+		syscall_isdir(f, (int)*(st+1));
+		break;
+		case SYS_INUMBER :
+		syscall_inumber(f, (int)*(st+1));
+		break;
 	}
 }

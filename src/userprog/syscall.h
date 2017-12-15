@@ -21,6 +21,12 @@ void syscall_tell(struct intr_frame *f, int fd);
 void syscall_mmap(struct intr_frame *f, int fd, void* addr);
 void syscall_munmap(struct intr_frame *f, int mapping);
 
+void syscall_chdir(struct intr_frame *f, const char* name);
+void syscall_mkdir(struct intr_frame *f, const char* name);
+void syscall_readdir(struct intr_frame *f, int fd, char *name);
+void syscall_isdir(struct intr_frame *f, int fd);
+void syscall_inumber(struct intr_frame *f, int fd);
+
 bool validate_memory (void* ptr);
 
 #endif /* userprog/syscall.h */

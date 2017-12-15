@@ -38,6 +38,8 @@ struct inode
     bool removed;                       /* True if deleted, false otherwise. */
     int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
     struct inode_disk data;             /* Inode content. */
+
+    bool isdir;                         /* is inode directory? */
   };
 
 /* Returns the disk sector that contains byte offset POS within
@@ -110,7 +112,7 @@ inode_create (disk_sector_t sector, off_t length)
    and returns a `struct inode' that contains it.
    Returns a null pointer if memory allocation fails. */
 struct inode *
-inode_open (disk_sector_t sector) 
+inode_open (disk_sector_t sector, bool isdir) 
 {
   struct list_elem *e;
   struct inode *inode;
@@ -138,6 +140,7 @@ inode_open (disk_sector_t sector)
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+  inode->isdir = isdir;
   disk_read (filesys_disk, inode->sector, &inode->data);
   return inode;
 }
@@ -193,6 +196,10 @@ inode_remove (struct inode *inode)
 {
   ASSERT (inode != NULL);
   inode->removed = true;
+}
+
+bool inode_isdir (struct inode *inode) {
+  return inode->isdir;
 }
 
 /* Reads SIZE bytes from INODE into BUFFER, starting at position OFFSET.

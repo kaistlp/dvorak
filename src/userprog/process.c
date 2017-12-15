@@ -58,6 +58,8 @@ process_execute (const char *cmd_line)
   // Update Parent, Child Info
   struct process *ppcb = process_current();
   pcb->parent = ppcb;
+  pcb->cur_dir = (ppcb->cur_dir == NULL)? dir_open_root() : ppcb->cur_dir;
+  
   list_push_back(&ppcb->child_list, &pcb->elem_heir);
   list_push_back(&process_list, &pcb->elem);
 
@@ -279,6 +281,8 @@ process_exit (void)
       free(pcb);
     }
 
+    //dir_close(pcb->cur_dir);
+
   }
 
   //frame_dump();
@@ -345,6 +349,8 @@ void init_pcb(struct process *pcb, const char* name){
   list_init(&pcb->mmap_list);
   pcb->mapid_num = 0;
 
+  pcb->cur_dir = dir_open_root();
+
   free(ptr);
 }
 
@@ -382,6 +388,7 @@ void process_init(void) {
   root_pcb->fd_num = 2;
   root_pcb->load = LOAD_SUCESS;
   root_pcb->tid = thread_current()->tid;
+  root_pcb->cur_dir = NULL;
 
   page_table_init();
 }
@@ -594,7 +601,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Open executable file. */
   lock_acquire(&file_lock);
-  file = filesys_open (file_name);
+  file = filesys_open (file_name, process_current()->cur_dir);
   if (file == NULL) 
     { 
       printf ("load: %s: open failed\n", file_name);

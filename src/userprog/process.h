@@ -37,13 +37,18 @@ struct process
 
     void* next_stptr;					/* pointr of next stack */
     void* esp;
+
+    struct dir* cur_dir;				/* process's current directory */
     
 };
 
 /* File node for file descriptor list */
 struct file_node {
 	int fd; 				// File desciprtor number
+
+	bool isdir;
 	struct file* file; 		// File structure (filesys/file.h)
+	struct dir* dir;
 	struct list_elem elem; 	// List element
 };
 
