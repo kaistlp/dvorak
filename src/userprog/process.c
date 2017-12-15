@@ -61,7 +61,11 @@ process_execute (const char *cmd_line)
   pcb->cur_dir = (ppcb->cur_dir == NULL)? dir_open_root() : ppcb->cur_dir;
   
   list_push_back(&ppcb->child_list, &pcb->elem_heir);
+
+  lock_acquire(&process_lock);
   list_push_back(&process_list, &pcb->elem);
+  lock_release(&process_lock);
+
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (cmd_line, PRI_DEFAULT, start_process, fn_copy);
@@ -500,12 +504,16 @@ struct process* get_child_process_by_tid (tid_t tid){
 struct process* lookup_process_by_pid (pid_t pid) {
   struct list_elem* e;
 
+  lock_acquire(&process_lock);
   for (e = list_begin (&process_list); e != list_end (&process_list); e = list_next (e))
   {
     struct process *p = list_entry(e, struct process, elem);
-    if (p->pid == pid)
+    if (p->pid == pid) {
+      lock_release(&process_lock);
       return p;
+    }
   }
+  lock_release(&process_lock);
   return NULL;
 }
 

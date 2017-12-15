@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "devices/disk.h"
+#include "threads/synch.h"
+
 
 void free_map_init (void);
 void free_map_read (void);

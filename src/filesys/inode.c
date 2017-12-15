@@ -11,13 +11,12 @@
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
-#define DIRECT_SIZE 125
+#define DIRECT_SIZE 126
 
 /* On-disk inode.
    Must be exactly DISK_SECTOR_SIZE bytes long. */
 struct inode_disk
   {
-    disk_sector_t start;                /* First data sector. */
     off_t length;                       /* File size in bytes. */
     unsigned magic;                     /* Magic number. */
     disk_sector_t direct_sector[DIRECT_SIZE];               
@@ -43,6 +42,7 @@ struct inode
 
     bool isdir;                         /* is inode directory? */
     char name[READDIR_MAX_LEN+1];
+
   };
 
 /* Returns the disk sector that contains byte offset POS within
@@ -53,8 +53,11 @@ static disk_sector_t
 byte_to_sector (const struct inode *inode, off_t pos) 
 {
   ASSERT (inode != NULL);
-  if (pos < inode->data.length)
-    return inode->data.start + pos / DISK_SECTOR_SIZE;
+
+
+  if (pos < inode->data.length) {
+    return inode->data.direct_sector[pos / DISK_SECTOR_SIZE];
+  }
   else
     return -1;
 }
@@ -90,23 +93,24 @@ inode_create (disk_sector_t sector, off_t length)
   disk_inode = calloc (1, sizeof *disk_inode);
   if (disk_inode != NULL)
     {
-      size_t sectors = bytes_to_sectors (length);
       disk_inode->length = length;
       disk_inode->magic = INODE_MAGIC;
-      if (free_map_allocate (sectors, &disk_inode->start))
-        {
-          disk_write (filesys_disk, sector, disk_inode);
-          if (sectors > 0) 
-            {
-              static char zeros[DISK_SECTOR_SIZE];
-              size_t i;
-              
-              for (i = 0; i < sectors; i++) 
-                disk_write (filesys_disk, disk_inode->start + i, zeros); 
-            }
-          success = true; 
-        } 
-      free (disk_inode);
+
+      size_t sectors = bytes_to_sectors (length);
+      int i;
+      for (i = 0; i < sectors; i++) {
+         if (!free_map_allocate (1, &disk_inode->direct_sector[i])) {
+          free (disk_inode);
+          return false;
+         }
+      }
+      disk_write (filesys_disk, sector, disk_inode); // write disk_inode
+      for (i = 0; i < sectors; i++) {
+         static char zeros[DISK_SECTOR_SIZE];
+         disk_write (filesys_disk, disk_inode->direct_sector[i], zeros); 
+      }
+      free(disk_inode);
+      success = true;
     }
   return success;
 }
@@ -184,8 +188,12 @@ inode_close (struct inode *inode)
       if (inode->removed) 
         {
           free_map_release (inode->sector, 1);
-          free_map_release (inode->data.start,
-                            bytes_to_sectors (inode->data.length)); 
+          size_t sectors = bytes_to_sectors(inode->data.length);
+          int i;
+          for (i = 0; i < sectors; ++i)
+           {
+             free_map_release(inode->data.direct_sector[i], 1);
+           } 
         }
 
       free (inode); 
@@ -213,7 +221,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
 {
   uint8_t *buffer = buffer_;
   off_t bytes_read = 0;
-  uint8_t *bounce = NULL;
+  // uint8_t *bounce = NULL;
 
   while (size > 0) 
     {
@@ -288,9 +296,14 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
     return 0;
   }
 
+  if (offset + size > inode->data.length) {
+    inode_growth(inode, offset+size);
+  }
+
   while (size > 0) 
     {
       /* Sector to write, starting byte offset within sector. */
+
       disk_sector_t sector_idx = byte_to_sector (inode, offset);
       int sector_ofs = offset % DISK_SECTOR_SIZE;
 
@@ -349,6 +362,22 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   // free (bounce);
 
   return bytes_written;
+}
+
+bool inode_growth (struct inode *inode, int target_size) {
+  size_t sectors = bytes_to_sectors (inode->data.length);
+  size_t target_sectors = bytes_to_sectors (target_size);
+  int i;
+  for (i = sectors; i < target_sectors; ++i)
+  {
+    if (!free_map_allocate(1, &inode->data.direct_sector[i])) {
+      return false;
+    }
+  }
+  inode->data.length = target_size;
+  disk_write (filesys_disk, inode->sector, &inode->data); // write disk_inode
+  return true;
+
 }
 
 /* Disables writes to INODE.
