@@ -11,6 +11,8 @@
 
 #define INIT_DIR_ENTRY_SIZE 16
 
+#define FS_VERBOSE 0
+
 /* Disk used for file system. */
 extern struct disk *filesys_disk;
 

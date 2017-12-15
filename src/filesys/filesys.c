@@ -68,16 +68,14 @@ filesys_create (const char *name, off_t initial_size, struct dir *cur_dir)
                   && dir_add (search_dir, filename, inode_sector, false));
   if (!success && inode_sector != 0) 
     free_map_release (inode_sector, 1);
-  if (cur_dir == NULL)
-    dir_close (dir);
 
-
+  inode_close(dir_get_inode(search_dir));
   return success;
 }
 
 bool
 filesys_mkdir (const char* name, struct dir *cur_dir) {
-  struct dir *dir = (cur_dir == NULL)? dir_open_root () : dir_reopen(cur_dir);
+  struct dir *dir = (cur_dir == NULL)? dir_open_root () : cur_dir;
 
   struct dir* search_dir;
   char* filename  = parse_filename(name, dir, &search_dir);
@@ -89,13 +87,16 @@ filesys_mkdir (const char* name, struct dir *cur_dir) {
     && dir_create(sector, INIT_DIR_ENTRY_SIZE)
     && dir_add(search_dir, filename, sector, true));
 
-  struct dir *added_dir = dir_open(inode_open(sector, true));
+  struct inode *inode = inode_open(sector, true);
+  struct dir *added_dir = dir_open(inode);
   success = success && dir_add(added_dir, ".", sector, true)
     && dir_add(added_dir, "..", inode_get_inumber(dir_get_inode(search_dir)), true);
-  
+  inode_close(inode);
 
   if (!success && sector != 0)
     free_map_release(sector, 1);
+
+  inode_close(dir_get_inode(search_dir));
   return success;
 }
 
@@ -107,7 +108,7 @@ filesys_mkdir (const char* name, struct dir *cur_dir) {
 struct file *
 filesys_open (const char *name, struct dir *cur_dir)
 {
-  struct dir *dir = (cur_dir == NULL)? dir_open_root () : dir_reopen(cur_dir);
+  struct dir *dir = (cur_dir == NULL)? dir_open_root () : cur_dir;
 
   struct dir* search_dir;
   char* filename  = parse_filename(name, dir, &search_dir);
@@ -120,6 +121,8 @@ filesys_open (const char *name, struct dir *cur_dir)
     dir_lookup (search_dir, filename, &inode);
   if (cur_dir == NULL)
     dir_close (dir);
+
+  inode_close(dir_get_inode(search_dir));
   return file_open (inode);
 }
 
@@ -138,28 +141,39 @@ filesys_remove (const char *name, struct dir *cur_dir)
     return NULL;
 
   bool success = dir != NULL && dir_remove (search_dir, filename);
-  if (cur_dir == NULL)
-    dir_close (dir); 
 
+  inode_close(dir_get_inode(search_dir));
   return success;
 }
 
 bool 
 filesys_chdir (const char* name, struct dir *cur_dir) {
   struct dir *dir = (cur_dir == NULL)? dir_open_root () : cur_dir;
+  // root directory
+  if(!strcmp(name, "/")) {
+    dir_close(cur_dir);
+    process_current()->cur_dir = dir_open_root();
+    return true;
+  }
+
   struct dir* search_dir;
   char* filename  = parse_filename(name, dir, &search_dir);
-  printf ("sector num %d\n" ,inode_get_inumber(dir_get_inode(search_dir)));
-  if (filename == NULL)
-    return false;
-
-  struct inode* inode;
-  if (dir_lookup(search_dir, name, &inode)) {
-    process_current()->cur_dir = dir_open(inode);
-    return true;
-  } else {
+  if (filename == NULL) {
+    dir_close(cur_dir);
     return false;
   }
+
+  struct inode* inode;
+  bool success = false;
+  if (dir_lookup(search_dir, filename, &inode)) {
+    dir_close(cur_dir);
+    process_current()->cur_dir = dir_open(inode);
+    success = true;
+  } 
+
+  // inode_close(inode);
+  inode_close(dir_get_inode(search_dir));
+  return success;
 }
 
 
@@ -178,7 +192,7 @@ char* parse_filename (char* input, struct dir *cur_dir, struct dir **final_dir) 
     str = str+1;
     output += 1;
   } else {
-    search_dir = cur_dir;
+    search_dir = dir_reopen(cur_dir);
   }
 
   // filename itself
@@ -195,22 +209,24 @@ char* parse_filename (char* input, struct dir *cur_dir, struct dir **final_dir) 
       break;
     }
     if (!dir_lookup(search_dir, ret_ptr, &inode)) {
-      printf("not found\n");
+      if (FS_VERBOSE) printf("not found\n");
+      inode_close(inode);
       return NULL;
     }
 
     if (inode_isdir(inode)) {
+      inode_close(dir_get_inode(search_dir));
       search_dir = dir_open(inode);
     } else {
       inode_close(inode);
-      printf("not dir\n");
-
+      if (FS_VERBOSE) printf("not dir\n");
       return NULL;
     }
     ret_ptr = strtok_r(NULL, "/", &next_ptr);
   }
 
   *final_dir = search_dir;
+
   output +=  (ret_ptr - str); 
   free(prev_ptr);
   return output;

@@ -101,9 +101,12 @@ lookup (const struct dir *dir, const char *name,
   ASSERT (name != NULL);
 
   for (ofs = 0; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
-       ofs += sizeof e) 
-    if (e.in_use && !strcmp (name, e.name)) 
+       ofs += sizeof e)
+    if (e.in_use) 
       {
+        if (strcmp (name, e.name)) {
+          continue;
+        } 
         if (ep != NULL)
           *ep = e;
         if (ofsp != NULL)
@@ -206,7 +209,13 @@ dir_remove (struct dir *dir, const char *name)
   if (inode == NULL)
     goto done;
 
+
   if (e.isdir) {
+    /* directory case */
+
+    if (inode_get_open_cnt(inode) > 1)
+      goto done;
+
     char *temp = malloc(NAME_MAX+1);
     struct dir* child_dir = dir_open(inode);
 
@@ -230,6 +239,8 @@ dir_remove (struct dir *dir, const char *name)
     }
     free(temp);
   } else  {
+    /* file case */
+
     /* Erase directory entry. */
     e.in_use = false;
     if (inode_write_at (dir->inode, &e, sizeof e, ofs) != sizeof e) 

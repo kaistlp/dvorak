@@ -71,11 +71,16 @@ void syscall_wait (struct intr_frame *f, pid_t pid) {
 }
 
 void syscall_create (struct intr_frame *f, const char* file, unsigned initial_size) {
+	lock_acquire(&file_lock);
 	f->eax = filesys_create(file, initial_size, process_current()->cur_dir);
+	lock_release(&file_lock);
 }
 
 void syscall_remove(struct intr_frame *f, const char* file) {
-	f->eax = filesys_remove(file, process_current()->cur_dir);	
+	lock_acquire(&file_lock);
+	f->eax = filesys_remove(file, process_current()->cur_dir);
+	lock_release(&file_lock);
+	
 }
 
 void syscall_open (struct intr_frame *f, const char* file_name) {

@@ -11,6 +11,8 @@
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
+#define DIRECT_SIZE 125
+
 /* On-disk inode.
    Must be exactly DISK_SECTOR_SIZE bytes long. */
 struct inode_disk
@@ -18,7 +20,7 @@ struct inode_disk
     disk_sector_t start;                /* First data sector. */
     off_t length;                       /* File size in bytes. */
     unsigned magic;                     /* Magic number. */
-    uint32_t unused[125];               /* Not used. */
+    disk_sector_t direct_sector[DIRECT_SIZE];               
   };
 
 /* Returns the number of sectors to allocate for an inode SIZE
@@ -40,6 +42,7 @@ struct inode
     struct inode_disk data;             /* Inode content. */
 
     bool isdir;                         /* is inode directory? */
+    char name[READDIR_MAX_LEN+1];
   };
 
 /* Returns the disk sector that contains byte offset POS within
@@ -281,8 +284,9 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   off_t bytes_written = 0;
   uint8_t *bounce = NULL;
 
-  if (inode->deny_write_cnt)
+  if (inode->deny_write_cnt) {
     return 0;
+  }
 
   while (size > 0) 
     {
@@ -373,3 +377,8 @@ inode_length (const struct inode *inode)
 {
   return inode->data.length;
 }
+
+int inode_get_open_cnt (struct inode *inode) {
+  return inode->open_cnt;
+}
+
