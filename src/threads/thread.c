@@ -40,6 +40,7 @@ static struct thread *initial_thread;
 
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
+static struct lock thread_lock;
 
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
@@ -94,6 +95,7 @@ thread_init (void)
   ASSERT (intr_get_level () == INTR_OFF);
 
   lock_init (&tid_lock);
+  lock_init (&thread_lock);
   list_init (&ready_list);
   list_init (&sleep_list);
   list_init (&all_list);
@@ -204,8 +206,10 @@ thread_create (const char *name, int priority,
   sf->eip = switch_entry;
   
   /* Add to all_list */
+  lock_acquire(&thread_lock);
   list_push_back(&all_list, &t->all_elem);
-  
+  lock_release(&thread_lock);
+
   /* Add to run queue. */
   thread_unblock (t);
   yield_if_priority_changed();
@@ -300,7 +304,11 @@ thread_exit (void)
   struct thread *curr = thread_current();
   ASSERT(curr);
   intr_disable ();
-  list_remove(&curr->all_elem);
+  lock_acquire(&thread_lock);
+  if (strcmp(curr->name, "main"))
+    list_remove(&curr->all_elem);
+  lock_release(&thread_lock);
+
   thread_current ()->status = THREAD_DYING;
   schedule ();
   NOT_REACHED ();
@@ -490,44 +498,58 @@ bool thread_is_alive (tid_t tid) {
 
   struct list_elem* e;
   //printf("%d\n", list_size(&all_list));
+  lock_acquire(&thread_lock);
   for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e))
   { 
     struct thread *t = list_entry(e, struct thread, all_elem);
     //printf("thread: %x\n",t);
     ASSERT(t);
-    if (list_entry(e, struct thread, all_elem)->tid == tid)
+    if (list_entry(e, struct thread, all_elem)->tid == tid) {
+      lock_release(&thread_lock);
       return true;
+    }
   }
+  lock_release(&thread_lock);
   return false;
 }
 
 struct thread *lookup_all_list(tid_t tid) {
   struct list_elem* e;
+  lock_acquire(&thread_lock);
   if (list_empty(&all_list)){
+    lock_release(&thread_lock);
     return NULL;
   }
 
   for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e))
   {
     struct thread *t = list_entry(e, struct thread, all_elem);
-    if (t->tid == tid)
+    if (t->tid == tid) {
+      lock_release(&thread_lock);
       return t;
+    }
   }
+  lock_release(&thread_lock);
   return NULL;
 }
 
 struct thread* lookup_thread_by_pid (pid_t pid) {
   struct list_elem* e;
+  lock_acquire(&thread_lock);
   if (list_empty(&all_list)){
+    lock_release(&thread_lock);
     return NULL;
   }
 
   for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e))
   {
     struct thread *t = list_entry(e, struct thread, all_elem);
-    if (t->pid == pid)
+    if (t->pid == pid) {
+      lock_release(&thread_lock);
       return t;
+    }
   }
+  lock_release(&thread_lock);
   return NULL;
 }
 

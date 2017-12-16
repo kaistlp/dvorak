@@ -147,12 +147,12 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
-  // printf ("Page fault at %p: %s error %s page in %s context. (pid: %d)\n",
+  // printf ("Page fault at %p: %s error %s page in %s context. (tid: %d)\n",
   //         fault_addr,
   //         not_present ? "not present" : "rights violation",
   //         write ? "writing" : "reading",
   //         user ? "user" : "kernel",
-  //         process_current()->pid);
+  //         thread_current()->tid);
   
   /* Turn interrupts back on (they were only off so that we could
      be assured of reading CR2 before it changed). */

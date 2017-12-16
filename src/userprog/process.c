@@ -59,6 +59,7 @@ process_execute (const char *cmd_line)
   struct process *ppcb = process_current();
   pcb->parent = ppcb;
   pcb->cur_dir = (ppcb->cur_dir == NULL)? dir_open_root() : ppcb->cur_dir;
+  thread_current()->cur_dir = pcb->cur_dir;
   
   list_push_back(&ppcb->child_list, &pcb->elem_heir);
 
@@ -72,7 +73,9 @@ process_execute (const char *cmd_line)
   if (tid == TID_ERROR) {
     if (VERBOSE) printf("Thread Creation FAIL\n");
     // Remove p on list
+    lock_acquire(&process_lock);
     list_remove(&pcb->elem); // from process_list
+    lock_release(&process_lock);
 
     //free resource
     remove_child_list(pcb);
@@ -359,12 +362,13 @@ void init_pcb(struct process *pcb, const char* name){
 }
 
 struct process* process_current(void){
+  lock_acquire(&process_lock);
   struct list_elem* e;
   if (list_empty(&process_list)){
+    lock_release(&process_lock);
     return NULL;
   }
 
-  lock_acquire(&process_lock);
   for (e = list_begin (&process_list); e != list_end (&process_list); e = list_next (e))
   {
     struct process *pcb = list_entry(e, struct process, elem);
@@ -609,7 +613,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Open executable file. */
   lock_acquire(&file_lock);
-  file = filesys_open (file_name, process_current()->cur_dir);
+  file = filesys_open (file_name, thread_current()->cur_dir);
   if (file == NULL) 
     { 
       printf ("load: %s: open failed\n", file_name);

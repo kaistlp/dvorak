@@ -111,6 +111,8 @@ struct thread
 #endif
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+
+    struct dir* cur_dir;        /* process's current directory */
   };
 
 /* If false (default), use round-robin scheduler.
